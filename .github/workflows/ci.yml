@@ -1,0 +1,27 @@
+name: Certifera CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Generate Next.js types
+        run: npx next typegen
+      - name: TypeScript validation
+        run: npm exec tsc -- --noEmit --pretty false
+      - name: Unit tests
+        run: npx vitest run
+      - name: Production build
+        run: npm run build
