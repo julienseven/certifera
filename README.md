@@ -4,7 +4,7 @@
 
 Certifera is an operations layer for funding, matching, proving, reviewing, and settling real-world outcomes. It is designed for AI agents and operators that need a trustworthy answer to a simple question: *did the action actually happen?*
 
-> Status: controlled-beta infrastructure. The public X and GitHub links in the UI are intentional launch placeholders; point them to the official organization before public beta.
+> Status: controlled-beta infrastructure. GitHub: [github.com/julienseven/certifera](https://github.com/julienseven/certifera) (private during closed beta). X: [x.com/certiferaxyz](https://x.com/certiferaxyz).
 
 ## What is implemented
 
