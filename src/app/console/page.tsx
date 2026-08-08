@@ -319,6 +319,7 @@ export default function ConsolePage() {
     } finally { setLoading(false); }
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect -- initial data fetches and derived-selection resets, not render loops */
   // Account bootstrap intentionally runs once; data loads only after session validation.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void loadAccount(); }, []);
@@ -344,6 +345,7 @@ export default function ConsolePage() {
   useEffect(() => {
     if (selectedRewardCents) setBidForm((form) => ({ ...form, quote: String(Math.max(25, Math.floor(selectedRewardCents / 100 * 0.85))) }));
   }, [selected?.id, selectedRewardCents]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function updateSelected(patch: Partial<WorkOrder>) {
     if (!selected) return;

@@ -40,8 +40,10 @@ export default function CohortsPage() {
     setSelectedId((current) => current && payload.cohorts.some((cohort) => cohort.id === current) ? current : payload.cohorts[0]?.id || "");
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect -- initial data fetch + derived-selection sync, not a render loop */
   useEffect(() => { void load().catch(() => window.location.assign("/access?next=/cohorts")); }, []);
   useEffect(() => { if (selected) { setRoster({ partnerIds: selected.partnerIds, relayIds: selected.relayIds }); setTaskForm((current) => ({ ...current, partnerId: selected.partnerIds[0] || "" })); } }, [selected]);
+  /* eslint-enable react-hooks/set-state-in-effect */
   function notify(text: string) { setNotice(text); window.setTimeout(() => setNotice(""), 7000); }
   function toggle(value: string, values: string[]) { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
 

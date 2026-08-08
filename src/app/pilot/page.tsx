@@ -35,6 +35,7 @@ export default function PilotPage() {
     setCheckNotes(Object.fromEntries(scorePayload.readiness.checks.filter((check) => check.source === "manual").map((check) => [check.key, check.note])));
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount, not a render loop
   useEffect(() => { void load().catch(() => window.location.assign("/access?next=/pilot")); }, []);
   function notify(message: string) { setNotice(message); window.setTimeout(() => setNotice(""), 6000); }
 

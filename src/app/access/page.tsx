@@ -15,6 +15,7 @@ export default function AccessPage() {
   const [messageKind, setMessageKind] = useState<"error" | "success">("error");
   const [form, setForm] = useState({ displayName: "", email: "", password: "", setupCode: "", mfaCode: "" });
 
+  /* eslint-disable react-hooks/set-state-in-effect -- one-time mount sync from URL params + initial data fetch, not a render loop */
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     const token = query.get("reset") || "";
@@ -37,6 +38,7 @@ export default function AccessPage() {
       }
     })();
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function setNotice(text: string, kind: "error" | "success") {
     setMessage(text);

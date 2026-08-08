@@ -1,0 +1,20 @@
+# Dependencies and framework output
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment and local secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs and tooling
+*.log
+coverage/
+.DS_Store
+
+# Local evidence or exports
+storage/
+tmp/

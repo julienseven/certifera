@@ -29,6 +29,7 @@ export default function OperationsPage() {
     setState(operationsPayload); setRelays(relayPayload.relays || []); setKeys(keyPayload.keys || []);
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount, not a render loop
   useEffect(() => { void load().catch(() => window.location.assign("/access?next=/operations")); }, []);
 
   function notify(text: string) { setMessage(text); window.setTimeout(() => setMessage(""), 7000); }
