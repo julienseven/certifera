@@ -1,0 +1,56 @@
+name: Maintenance sweep
+
+# Vercel's Hobby plan caps cron at once per day, but the review SLA is a
+# six-hour window and execution deadlines are measured in minutes — a daily
+# sweep would let breaches sit undetected for up to 24 hours. The daily Vercel
+# cron in vercel.json stays as a backstop; this is the real schedule.
+#
+# Scheduled runs are best-effort: GitHub can delay them under load, and it
+# disables schedules on repositories with no activity for 60 days. Neither is
+# load-bearing for correctness — the sweep is idempotent and a late run simply
+# escalates a little later.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Never overlap two sweeps: each escalation is its own transaction and a
+  # second concurrent run would contend for the same rows.
+  group: maintenance
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger maintenance
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://certifera.xyz' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET is not set on this repository."
+            exit 1
+          fi
+
+          response=$(curl --silent --show-error --fail-with-body \
+            --max-time 120 \
+            --write-out '\n%{http_code}' \
+            -X POST "$SITE_URL/api/internal/maintenance" \
+            -H "Authorization: Bearer $CRON_SECRET") || {
+              echo "::error::Maintenance request failed."
+              echo "$response"
+              exit 1
+            }
+
+          status=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "HTTP $status"
+          echo "$body"
+
+          # A backlog means the per-run ceiling was hit and outcomes are waiting.
+          remaining=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('overdueRemaining',0))" 2>/dev/null || echo 0)
+          if [ "$remaining" != "0" ]; then
+            echo "::warning::$remaining overdue outcomes left for the next run."
+          fi
