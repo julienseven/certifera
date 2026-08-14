@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://certifera.io";
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://certifera.xyz";
 export const SITE_NAME = "Certifera";
 export const X_HANDLE = "@certiferaxyz";
 

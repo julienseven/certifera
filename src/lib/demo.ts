@@ -5,8 +5,8 @@ import { hashPassword } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 
 const DEMO_RELAY_HANDLE = "demo-relay";
-const DEMO_OPERATOR_EMAIL = "demo-operator@certifera.io";
-const DEMO_RELAY_EMAIL = "demo-relay@certifera.io";
+const DEMO_OPERATOR_EMAIL = "demo-operator@certifera.xyz";
+const DEMO_RELAY_EMAIL = "demo-relay@certifera.xyz";
 
 /**
  * A dedicated, always-on-and-active relay + two user accounts (operator, relay)

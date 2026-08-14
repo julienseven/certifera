@@ -5,8 +5,8 @@ import { ensureDemoIdentities } from "@/lib/demo";
 import { eq } from "drizzle-orm";
 
 const DEMO_RELAY_HANDLE = "demo-relay";
-const DEMO_OPERATOR_EMAIL = "demo-operator@certifera.io";
-const DEMO_RELAY_EMAIL = "demo-relay@certifera.io";
+const DEMO_OPERATOR_EMAIL = "demo-operator@certifera.xyz";
+const DEMO_RELAY_EMAIL = "demo-relay@certifera.xyz";
 
 describe("ensureDemoIdentities", () => {
   afterAll(async () => {

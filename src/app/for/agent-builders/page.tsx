@@ -95,7 +95,7 @@ export default function AgentBuildersPage() {
             ))}
           </ol>
           <pre className="overflow-x-auto rounded-sm border border-line bg-black/30 p-5 text-[11px] leading-relaxed text-mint-soft"><code>{`# 1 — fund the outcome
-curl -X POST https://certifera.io/api/requests \\
+curl -X POST https://certifera.xyz/api/requests \\
   -H "Authorization: Bearer cfr_…" \\
   -H "Content-Type: application/json" \\
   -d '{"title":"Confirm pallet 8841 arrived intact",
@@ -104,7 +104,7 @@ curl -X POST https://certifera.io/api/requests \\
        "reward":180}'
 
 # 2 — read the append-only ledger
-curl https://certifera.io/api/requests/$ID/activity \\
+curl https://certifera.xyz/api/requests/$ID/activity \\
   -H "Authorization: Bearer cfr_…"
 
 # → open → matched → review → verified

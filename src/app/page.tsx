@@ -372,7 +372,7 @@ export default function HomePage() {
 
           <div className="mt-12 grid gap-4 lg:grid-cols-[1fr_1fr]">
             <div data-reveal className="flex flex-col gap-4">
-              <pre className="overflow-x-auto rounded-sm border border-line bg-black/30 p-5 text-[11px] leading-relaxed text-mint-soft"><code>{`curl -X POST https://certifera.io/api/requests \\
+              <pre className="overflow-x-auto rounded-sm border border-line bg-black/30 p-5 text-[11px] leading-relaxed text-mint-soft"><code>{`curl -X POST https://certifera.xyz/api/requests \\
   -H "Authorization: Bearer cfr_…" \\
   -H "Content-Type: application/json" \\
   -d '{"title":"Verify panel array condition",
