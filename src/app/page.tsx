@@ -1,6 +1,17 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { CSSProperties } from "react";
+import { SiteFooter } from "@/components/marketing/chrome";
+import { SITE_URL, jsonLd, pageMetadata } from "@/lib/seo";
 import { ScrollReveal, WaitlistForm } from "./landing-client";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Certifera — Verified execution for agents",
+  description:
+    "Certifera is the operations layer for verified physical outcomes. Agents post a machine-readable request, vetted relays bid and execute, evidence is hashed and scored, and payout releases only after review.",
+  path: "/",
+  absoluteTitle: true,
+});
 
 type IconName = "arrow" | "spark" | "shield" | "layers" | "pulse" | "check";
 
@@ -40,7 +51,7 @@ const navLinks = [
   ["#proof", "Proof"],
   ["#api", "API"],
   ["#economics", "Economics"],
-  ["#status", "Status"],
+  ["/security", "Security"],
   ["/docs", "Docs"],
 ] as const;
 
@@ -122,6 +133,23 @@ const statusColumns = [
   ],
 ] as const;
 
+const audiences = [
+  [
+    "/for/agent-builders",
+    "For agent builders",
+    "Give your agent a verified hand in the physical world.",
+    "Post an outcome over REST, poll the append-only ledger, and reason over a proof bundle carrying a SHA-256 digest, a 0–100 capture score, and named gaps.",
+    ["Four scopes, one lifecycle, no dashboard dependency", "Sandbox settlement to exercise the full flow without moving money", "Evidence that names what it cannot prove"],
+  ],
+  [
+    "/for/relays",
+    "For field relays",
+    "Get paid to prove what you can already see.",
+    "Bid your own price on work inside your approved coverage zone, capture evidence from a phone, and get paid once the proof clears a six-hour review.",
+    ["Flat 5% protocol fee — you keep 95% of your quote", "Reputation written to a ledger you can read", "Deadlines set by arithmetic, not by a rating algorithm"],
+  ],
+] as const;
+
 const gates = [
   ["≥ 90%", "of matched tasks reach proof"],
   ["≥ 95%", "of reviews resolve inside SLA"],
@@ -133,22 +161,40 @@ const revealDelay = (index: number) => ({ "--reveal-delay": `${index * 80}ms` })
 export default function HomePage() {
   return (
     <main className="console-surface min-h-screen overflow-hidden bg-ink text-bone selection:bg-mint selection:text-mint-ink">
+      {/* Organization and WebSite are emitted once in the root layout; this graph
+          adds only the home-page-specific entities and references them by @id. */}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
-            "@context": "https://schema.org",
-            "@graph": [
-              { "@type": "Organization", name: "Certifera", url: "https://certifera.io", sameAs: ["https://x.com/certiferaxyz"] },
-              {
-                "@type": "SoftwareApplication",
-                name: "Certifera",
-                applicationCategory: "BusinessApplication",
-                operatingSystem: "Web",
-                description: "An operations layer for funding, proving, reviewing, and settling verified physical outcomes, with private hash-addressed evidence and an append-only execution ledger.",
-              },
-            ],
-          }),
+          __html: jsonLd([
+            {
+              "@type": "SoftwareApplication",
+              "@id": `${SITE_URL}/#software`,
+              name: "Certifera",
+              applicationCategory: "BusinessApplication",
+              operatingSystem: "Web",
+              url: SITE_URL,
+              publisher: { "@id": `${SITE_URL}/#organization` },
+              description: "An operations layer for funding, proving, reviewing, and settling verified physical outcomes, with private hash-addressed evidence and an append-only execution ledger.",
+              featureList: [
+                "Open bid market for real-world outcome requests",
+                "SHA-256 addressed private evidence with capture scoring",
+                "Append-only execution ledger across every state transition",
+                "Scoped cfr_ agent API keys with role-enforced routes",
+                "Sandbox and Stripe Connect settlement adapters",
+              ],
+              offers: { "@type": "Offer", price: "0", priceCurrency: "USD", description: "Controlled beta access. A flat 5% protocol fee applies to settled outcomes." },
+            },
+            {
+              "@type": "Service",
+              "@id": `${SITE_URL}/#service`,
+              name: "Verified physical outcome execution",
+              serviceType: "Verification infrastructure",
+              provider: { "@id": `${SITE_URL}/#organization` },
+              areaServed: "US",
+              description: "Fund a machine-readable real-world outcome, have a vetted relay execute it, and settle only against reviewed, hash-addressed evidence.",
+            },
+          ]),
         }}
       />
       <noscript>
@@ -440,6 +486,53 @@ export default function HomePage() {
           </div>
         </section>
 
+        <section className="border-b border-line px-5 py-14 sm:px-8 lg:px-11 lg:py-20">
+          <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mint">Two sides, one ledger</p>
+              <h2 className="mt-4 max-w-2xl text-[clamp(2.4rem,5vw,5.15rem)] font-medium leading-[0.91] tracking-[-0.075em]">Pick the side you’re on.</h2>
+            </div>
+            <p className="max-w-sm text-[13px] leading-relaxed text-white/50">Buyers fund certainty. Relays supply it. The same append-only record settles both, and neither side sees a metric the other cannot.</p>
+          </div>
+
+          <div className="mt-12 grid gap-4 lg:grid-cols-2">
+            {audiences.map(([href, eyebrow, title, copy, points]) => (
+              <Link
+                key={href}
+                href={href}
+                data-reveal
+                className="ease-out-expo group flex flex-col justify-between rounded-sm border border-line bg-panel p-6 transition-[transform,border-color,background-color] duration-300 hover:-translate-y-[3px] hover:border-mint/40 hover:bg-mint/[0.035] sm:p-8"
+              >
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mint">{eyebrow}</p>
+                  <h3 className="mt-4 text-[clamp(1.7rem,3vw,2.4rem)] font-medium leading-[1.02] tracking-[-0.055em]">{title}</h3>
+                  <p className="mt-4 max-w-md text-[13px] leading-relaxed text-white/55">{copy}</p>
+                  <ul className="mt-6 space-y-2.5">
+                    {points.map((point) => (
+                      <li key={point} className="flex gap-3 text-[13px] leading-relaxed text-white/58">
+                        <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-mint" />
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <span className="mt-8 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-mint-soft">
+                  Read the detail
+                  <span className="ease-out-expo transition-transform duration-300 group-hover:translate-x-1"><Icon name="arrow" size={14} /></span>
+                </span>
+              </Link>
+            ))}
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-x-6 gap-y-3 border-t border-line pt-6 text-[12px] text-white/45">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/32">Also worth reading</span>
+            <Link href="/security" className="transition-colors hover:text-mint">Security &amp; evidence integrity</Link>
+            <Link href="/faq" className="transition-colors hover:text-mint">Frequently asked questions</Link>
+            <Link href="/glossary" className="transition-colors hover:text-mint">Glossary of verified execution</Link>
+            <Link href="/launch" className="transition-colors hover:text-mint">Launch readiness</Link>
+          </div>
+        </section>
+
         <section id="access" className="scroll-mt-[88px] border-t border-line bg-mint px-5 py-14 text-mint-ink shadow-[0_-30px_120px_-40px_rgba(115,245,154,0.35)] sm:px-8 lg:px-11 lg:py-20">
           <div className="grid gap-10 lg:grid-cols-[1fr_1fr] lg:gap-16">
             <div>
@@ -454,18 +547,9 @@ export default function HomePage() {
           </div>
         </section>
 
-        <footer className="flex flex-col gap-4 border-t border-line px-5 py-6 text-[10px] uppercase tracking-[0.15em] text-white/35 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-11">
-          <p>© 2026 Certifera / Verification infrastructure</p>
-          <div className="flex flex-wrap gap-5">
-            <Link className="transition-colors hover:text-mint" href="/docs">Docs</Link>
-            <Link className="transition-colors hover:text-mint" href="/launch">Launch readiness</Link>
-            <a className="transition-colors hover:text-mint" href="https://x.com/certiferaxyz" target="_blank" rel="noreferrer">X ↗</a>
-            <a className="transition-colors hover:text-mint" href="https://github.com/julienseven/certifera" target="_blank" rel="noreferrer">GitHub ↗</a>
-            <a className="transition-colors hover:text-mint" href="#access">Join circle</a>
-          </div>
-        </footer>
       </div>
 
+      <SiteFooter />
       <ScrollReveal />
     </main>
   );

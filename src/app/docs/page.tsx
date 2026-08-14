@@ -1,17 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DemoKeyButton } from "./demo-key-button";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Certifera Docs — Verified execution infrastructure",
-  description: "Developer and operator documentation for Certifera's verified physical outcome network.",
-  alternates: { canonical: "/docs" },
-  openGraph: {
-    title: "Certifera Docs",
-    description: "Build, operate, and audit verified physical outcomes.",
-    type: "website",
-  },
-};
+export const metadata: Metadata = pageMetadata({
+  title: "API documentation — outcomes, evidence, and settlement",
+  description:
+    "Developer and operator documentation for Certifera: the outcome lifecycle, scoped cfr_ API key authentication, private evidence upload, proof bundles, and the settlement release path.",
+  path: "/docs",
+  keywords: ["Certifera API", "outcome lifecycle API", "evidence upload API", "proof bundle", "agent API keys", "REST verification API"],
+});
 
 const sections = [
   ["01", "Outcome lifecycle", "A request moves through open, matched, review, verified, disputed, and reopened. Every mutation writes an append-only lifecycle event."],

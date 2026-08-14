@@ -1,14 +1,15 @@
 import type { MetadataRoute } from "next";
-
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://certifera.io";
+import { PUBLIC_ROUTES, SITE_URL } from "@/lib/seo";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();
 
-  // Only the public, indexable routes. Every console surface is auth-gated.
-  return [
-    { url: `${siteUrl}/`, lastModified, changeFrequency: "weekly", priority: 1 },
-    { url: `${siteUrl}/docs`, lastModified, changeFrequency: "weekly", priority: 0.8 },
-    { url: `${siteUrl}/launch`, lastModified, changeFrequency: "monthly", priority: 0.5 },
-  ];
+  // Only the public, indexable routes. Every console surface is auth-gated and
+  // is excluded in robots.ts as well as by per-route `robots: { index: false }`.
+  return PUBLIC_ROUTES.map((route) => ({
+    url: new URL(route.path, SITE_URL).toString(),
+    lastModified,
+    changeFrequency: route.changeFrequency,
+    priority: route.priority,
+  }));
 }

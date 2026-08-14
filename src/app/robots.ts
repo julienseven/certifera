@@ -1,6 +1,8 @@
 import type { MetadataRoute } from "next";
+import { SITE_URL } from "@/lib/seo";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://certifera.io";
+/** Auth-gated surfaces. Kept in one place so robots.ts and the sitemap cannot drift. */
+const PRIVATE_PATHS = ["/api/", "/access", "/console", "/pilot", "/cohorts", "/operations", "/insights"];
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -10,10 +12,14 @@ export default function robots(): MetadataRoute.Robots {
         allow: "/",
         // Belt and braces with the per-route `robots: { index: false }` metadata
         // in each private route group's layout.
-        disallow: ["/api/", "/access", "/console", "/pilot", "/cohorts", "/operations", "/insights"],
+        disallow: PRIVATE_PATHS,
       },
+      // Answer engines are allowed the same public surface as search crawlers:
+      // the content pages are written to be quoted, and blocking them only
+      // removes attribution, not the summarisation.
+      { userAgent: ["GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended"], allow: "/", disallow: PRIVATE_PATHS },
     ],
-    sitemap: `${siteUrl}/sitemap.xml`,
-    host: siteUrl,
+    sitemap: `${SITE_URL}/sitemap.xml`,
+    host: SITE_URL,
   };
 }

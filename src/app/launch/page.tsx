@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Certifera — Launch readiness",
-  description: "The production and pilot launch readiness plan for Certifera.",
-};
+export const metadata: Metadata = pageMetadata({
+  title: "Launch readiness — what ships before real money",
+  description:
+    "Certifera's public go/no-go plan: identity and authority, evidence integrity, money and compliance, and the pilot gates that must clear before the controlled beta widens.",
+  path: "/launch",
+  keywords: ["launch readiness", "beta go no-go gates", "verification platform roadmap", "pilot criteria"],
+});
 
 type Priority = "blocker" | "before-beta" | "post-pmf";
 
