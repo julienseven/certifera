@@ -3,7 +3,7 @@ import { payouts, stripeWebhookEvents } from "@/db/schema";
 import { recordLifecycleEvent } from "@/lib/lifecycle";
 import { recordOperationalEvent, reportException } from "@/lib/observability";
 import { stripePayloadHash, type StripeEvent, verifyStripeWebhook } from "@/lib/stripe-webhook";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export async function POST(request: Request) {
   const payload = await request.text();
@@ -35,11 +35,32 @@ export async function POST(request: Request) {
     }
 
     if (event.type === "transfer.created") {
-      await db.transaction(async (tx) => {
-        await tx.update(payouts).set({ status: "released", settlementProvider: "stripe", settlementRef: event.data.object.id || payout.settlementRef, providerEventId: event.id, reconciledAt: new Date(), failureReason: null }).where(eq(payouts.id, payout.id));
-        await tx.update(stripeWebhookEvents).set({ status: "processed", processedAt: new Date() }).where(eq(stripeWebhookEvents.id, stored.id));
-        await recordLifecycleEvent(tx, { workOrderId: payout.workOrderId, type: "stripe_transfer_reconciled", actor: "stripe/webhook", summary: "Stripe confirmed the relay transfer.", data: { payoutId: payout.id, stripeEventId: event.id, transferId: event.data.object.id || null } });
+      // Guard against an out-of-order transfer.created arriving after a
+      // transfer.failed/reversed already resolved this payout: only a payout
+      // still "authorized" may be marked released.
+      const released = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(payouts)
+          .set({ status: "released", settlementProvider: "stripe", settlementRef: event.data.object.id || payout.settlementRef, providerEventId: event.id, reconciledAt: new Date(), failureReason: null })
+          .where(and(eq(payouts.id, payout.id), eq(payouts.status, "authorized")))
+          .returning();
+        await tx
+          .update(stripeWebhookEvents)
+          .set({
+            status: row ? "processed" : "ignored",
+            failureReason: row ? null : `Payout was already "${payout.status}"; ignored an out-of-order transfer.created.`,
+            processedAt: new Date(),
+          })
+          .where(eq(stripeWebhookEvents.id, stored.id));
+        if (row) {
+          await recordLifecycleEvent(tx, { workOrderId: payout.workOrderId, type: "stripe_transfer_reconciled", actor: "stripe/webhook", summary: "Stripe confirmed the relay transfer.", data: { payoutId: payout.id, stripeEventId: event.id, transferId: event.data.object.id || null } });
+        }
+        return row;
       });
+      if (!released) {
+        await recordOperationalEvent({ level: "warning", service: "stripe", code: "stale_transfer_created", message: `Ignored an out-of-order transfer.created for payout already in status "${payout.status}".`, resourceType: "payout", resourceId: payout.id, data: { stripeEventId: event.id } });
+        return Response.json({ ok: true, ignored: true });
+      }
       return Response.json({ ok: true, reconciled: true });
     }
 

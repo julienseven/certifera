@@ -105,11 +105,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           data: { reviewDueAt: workOrder.reviewDueAt?.toISOString() || null },
         });
       }
-      await tx
-        .update(proofBundles)
-        .set({ status: nextStatus, reviewerNote: note, reviewedAt: new Date() })
-        .where(eq(proofBundles.id, proof.id));
-      await tx
+      const [updatedWorkOrder] = await tx
         .update(workOrders)
         .set({
           status: nextStatus,
@@ -118,7 +114,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           slaStatus: decision === "approve" ? "settled" : "disputed",
           updatedAt: new Date(),
         })
-        .where(eq(workOrders.id, id));
+        .where(and(eq(workOrders.id, id), eq(workOrders.status, "review")))
+        .returning();
+      if (!updatedWorkOrder) {
+        return { ok: false, error: "This request was already reviewed. Refresh and try again.", httpStatus: 409 };
+      }
+      await tx
+        .update(proofBundles)
+        .set({ status: nextStatus, reviewerNote: note, reviewedAt: new Date() })
+        .where(eq(proofBundles.id, proof.id));
 
       if (decision === "dispute") {
         const newReputation = Math.max(0, relay.reputation + REPUTATION_DISPUTE_PENALTY);

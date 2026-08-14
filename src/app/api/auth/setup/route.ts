@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { emailVerificationTokens, users } from "@/db/schema";
 import { createSession, enforceAnonymousRateLimit, hashPassword, writeAudit } from "@/lib/auth";
 import { certiferaUrl, sendMail } from "@/lib/mailer";
-import { opaqueHash } from "@/lib/security";
+import { authLinksExposed, opaqueHash } from "@/lib/security";
 import { count } from "drizzle-orm";
 
 function value(body: Record<string, unknown>, key: string, max: number) {
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Response.json({ error: "Enter a valid email address." }, { status: 400 });
     if (password.length < 12) return Response.json({ error: "Use a password with at least 12 characters." }, { status: 400 });
     if (configuredCode && setupCode !== configuredCode) return Response.json({ error: "The setup code is invalid." }, { status: 403 });
-    if (verificationRequired && (!process.env.CERTIFERA_RESEND_API_KEY || !process.env.CERTIFERA_MAIL_FROM) && process.env.CERTIFERA_EXPOSE_AUTH_LINKS !== "true") {
+    if (verificationRequired && (!process.env.CERTIFERA_RESEND_API_KEY || !process.env.CERTIFERA_MAIL_FROM) && !authLinksExposed()) {
       return Response.json({ error: "Email verification is required but transactional email is not configured." }, { status: 503 });
     }
 
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       user: { email: user.email, displayName: user.displayName, role: user.role },
       verificationRequired,
       delivery: delivery.mode,
-      ...(process.env.CERTIFERA_EXPOSE_AUTH_LINKS === "true" ? { verificationUrl } : {}),
+      ...(authLinksExposed() ? { verificationUrl } : {}),
     }, { status: 201 });
   } catch (error) {
     console.error("setup failed", error);

@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { emailVerificationTokens, relays, users } from "@/db/schema";
 import { hashPassword, requireIdentity, roles, writeAudit } from "@/lib/auth";
 import { certiferaUrl, sendMail } from "@/lib/mailer";
-import { opaqueHash } from "@/lib/security";
+import { authLinksExposed, opaqueHash } from "@/lib/security";
 import { eq } from "drizzle-orm";
 
 function stringValue(body: Record<string, unknown>, key: string, max: number) {
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       const [relay] = await db.select().from(relays).where(eq(relays.id, relayId)).limit(1);
       if (!relay || !relay.active || relay.onboardingStatus !== "approved") return Response.json({ error: "Choose an approved active relay profile." }, { status: 400 });
     }
-    if (verificationRequired && (!process.env.CERTIFERA_RESEND_API_KEY || !process.env.CERTIFERA_MAIL_FROM) && process.env.CERTIFERA_EXPOSE_AUTH_LINKS !== "true") {
+    if (verificationRequired && (!process.env.CERTIFERA_RESEND_API_KEY || !process.env.CERTIFERA_MAIL_FROM) && !authLinksExposed()) {
       return Response.json({ error: "Email verification is required but transactional email is not configured." }, { status: 503 });
     }
     const [user] = await db.insert(users).values({
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     const verificationUrl = certiferaUrl(`/api/auth/verification/confirm?token=${encodeURIComponent(token)}`);
     const delivery = await sendMail({ to: user.email, subject: "Verify your Certifera account", text: `Verify your Certifera account: ${verificationUrl}` });
     await writeAudit({ actorId: auth.identity.userId, action: "user_onboarded", resourceType: "user", resourceId: user.id, request, data: { role: user.role, relayId: user.relayId, verificationRequired } });
-    return Response.json({ user, delivery: delivery.mode, ...(process.env.CERTIFERA_EXPOSE_AUTH_LINKS === "true" ? { verificationUrl } : {}) }, { status: 201 });
+    return Response.json({ user, delivery: delivery.mode, ...(authLinksExposed() ? { verificationUrl } : {}) }, { status: 201 });
   } catch (error) {
     console.error("user onboard failed", error);
     return Response.json({ error: "Could not onboard the user. The email may already be in use." }, { status: 500 });

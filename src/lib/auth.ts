@@ -28,6 +28,12 @@ function hashValue(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function hashesMatch(expected: string, actual: string) {
+  const left = Buffer.from(expected, "hex");
+  const right = Buffer.from(actual, "hex");
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
 export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const derived = (await scrypt(password, salt, 64)) as Buffer;
@@ -103,7 +109,7 @@ export async function getApiKeyIdentity(request: Request): Promise<Identity | nu
     .innerJoin(users, eq(apiKeys.userId, users.id))
     .where(and(eq(apiKeys.prefix, prefix), isNull(apiKeys.revokedAt)))
     .limit(1);
-  if (!row || row.key.tokenHash !== hashValue(token) || (row.key.expiresAt && row.key.expiresAt < new Date())) return null;
+  if (!row || !hashesMatch(row.key.tokenHash, hashValue(token)) || (row.key.expiresAt && row.key.expiresAt < new Date())) return null;
   const identity = identityFromUser(row.user, "api_key", row.key.scopes);
   if (!identity) return null;
   await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.key.id));

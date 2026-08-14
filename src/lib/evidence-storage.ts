@@ -1,5 +1,6 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Readable } from "node:stream";
+import { recordOperationalEvent } from "@/lib/observability";
 
 export type EvidenceStorageProvider = "database" | "s3";
 
@@ -95,7 +96,17 @@ export async function scanEvidence(input: { bytes: Buffer; fileName: string; con
     }),
   });
   const payload = (await response.json().catch(() => null)) as { clean?: boolean } | null;
-  if (!response.ok || !payload) return scanRequired ? { status: "pending" as const } : { status: "validated" as const };
+  if (!response.ok || !payload) {
+    await recordOperationalEvent({
+      level: scanRequired ? "warning" : "error",
+      service: "evidence",
+      code: "scan_response_invalid",
+      message: `Malware scanner returned an unusable response (status ${response.status}).`,
+      resourceType: "evidence_scan",
+      data: { sha256: input.sha256, scanRequired, fallbackStatus: scanRequired ? "pending" : "validated" },
+    });
+    return scanRequired ? { status: "pending" as const } : { status: "validated" as const };
+  }
   return { status: payload.clean === true ? "validated" as const : "rejected" as const };
 }
 

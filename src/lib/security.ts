@@ -39,3 +39,7 @@ export function validateTotp(secretBase32: string, token: string) {
 export function opaqueHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
+
+export function authLinksExposed() {
+  return process.env.CERTIFERA_EXPOSE_AUTH_LINKS === "true" && process.env.NODE_ENV !== "production";
+}

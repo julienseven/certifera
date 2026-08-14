@@ -1,11 +1,19 @@
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { createSession, enforceAnonymousRateLimit, verifyPassword, writeAudit } from "@/lib/auth";
+import { createSession, enforceAnonymousRateLimit, hashPassword, verifyPassword, writeAudit } from "@/lib/auth";
 import { decryptField, validateTotp } from "@/lib/security";
 import { eq } from "drizzle-orm";
 
 const MAX_FAILED_LOGINS = 5;
 const LOCKOUT_MINUTES = 15;
+
+// Fixed cost stand-in for verifyPassword's scrypt work when no account exists, so
+// response latency does not reveal whether an email is registered.
+let timingGuardHash: Promise<string> | null = null;
+function unknownAccountHash() {
+  if (!timingGuardHash) timingGuardHash = hashPassword(crypto.randomUUID());
+  return timingGuardHash;
+}
 
 export async function POST(request: Request) {
   const rate = await enforceAnonymousRateLimit(request, "login", 10);
@@ -18,11 +26,15 @@ export async function POST(request: Request) {
     const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     const now = new Date();
 
+    // Always pay the scrypt cost, even for an unregistered email, so the two cases
+    // are not distinguishable by response latency.
+    const passwordOk = await verifyPassword(password, user?.passwordHash ?? (await unknownAccountHash()));
+
     const denied = !user
       || user.status !== "active"
       || Boolean(user.lockedUntil && user.lockedUntil > now)
       || (process.env.CERTIFERA_EMAIL_VERIFICATION_REQUIRED === "true" && !user.emailVerifiedAt)
-      || !(user && await verifyPassword(password, user.passwordHash));
+      || !passwordOk;
     if (denied) {
       if (user && user.status === "active" && (!user.lockedUntil || user.lockedUntil <= now)) {
         const failures = user.failedLoginCount + 1;

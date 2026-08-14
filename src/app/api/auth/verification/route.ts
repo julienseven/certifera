@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { emailVerificationTokens, users } from "@/db/schema";
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { certiferaUrl, sendMail } from "@/lib/mailer";
-import { opaqueHash } from "@/lib/security";
+import { authLinksExposed, opaqueHash } from "@/lib/security";
 import { eq } from "drizzle-orm";
 
 export async function POST(request: Request) {
@@ -23,5 +23,5 @@ export async function POST(request: Request) {
     text: `Verify your Certifera account within 24 hours: ${link}`,
   });
   await writeAudit({ actorId: user.id, action: "email_verification_requested", resourceType: "user", resourceId: user.id, request });
-  return Response.json({ ok: true, delivery: delivery.mode, ...(process.env.CERTIFERA_EXPOSE_AUTH_LINKS === "true" ? { verificationUrl: link } : {}) });
+  return Response.json({ ok: true, delivery: delivery.mode, ...(authLinksExposed() ? { verificationUrl: link } : {}) });
 }
