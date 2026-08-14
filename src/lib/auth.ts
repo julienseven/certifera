@@ -128,8 +128,32 @@ export function hasScope(identity: Identity, scope: string) {
   return identity.method === "session" || identity.scopes.includes("*") || identity.scopes.includes(scope);
 }
 
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Collapses resource identifiers in a path to a fixed placeholder.
+ *
+ * The rate-limit key is (subject, route, window). Using the raw pathname put the
+ * outcome id inside `route`, so every distinct id opened its own bucket: the
+ * documented 30/min ceiling on /review and /settlement was really 30/min *per
+ * outcome*, and a caller holding N outcomes got N x 30. It also grew
+ * api_rate_limits by one row per user per outcome per minute rather than per
+ * user per route per minute.
+ *
+ * Segment 3 of /api/requests/... is always an id, including when a caller sends
+ * something that is not a UUID — normalising positionally as well as by shape
+ * means a junk id cannot mint a fresh bucket on its way to a 404.
+ */
+export function normalizeRateLimitRoute(pathname: string) {
+  const segments = pathname.split("/");
+  if (segments[1] === "api" && segments[2] === "requests" && segments.length > 3 && segments[3]) {
+    segments[3] = ":id";
+  }
+  return segments.map((segment) => (UUID_SEGMENT.test(segment) ? ":id" : segment)).join("/");
+}
+
 function requestRoute(request: Request) {
-  return new URL(request.url).pathname;
+  return normalizeRateLimitRoute(new URL(request.url).pathname);
 }
 
 function rateLimitForRoute(route: string) {
