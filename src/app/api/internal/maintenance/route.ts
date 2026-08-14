@@ -7,7 +7,11 @@ function hasCronAuthorization(request: Request) {
   return Boolean(configured && authorization === `Bearer ${configured}`);
 }
 
-export async function POST(request: Request) {
+// The hourly sweep is bounded per run, but each SLA escalation is its own
+// transaction, so give the function room beyond the 10s default.
+export const maxDuration = 60;
+
+async function handle(request: Request) {
   const cronAuthorized = hasCronAuthorization(request);
   const identity = cronAuthorized ? null : await getRequestIdentity(request);
   if (!cronAuthorized && (!identity || !hasRole(identity, ["admin"]))) {
@@ -22,3 +26,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "Maintenance execution failed." }, { status: 500 });
   }
 }
+
+/**
+ * Vercel Cron invokes its target with GET, so a POST-only route would have
+ * returned 405 on every scheduled run and the sweep would never have fired.
+ * POST stays for manual admin triggering.
+ */
+export const GET = handle;
+export const POST = handle;
