@@ -53,7 +53,53 @@ const sandboxBids = [
   { orderRef: "sandbox-canopy-003", relayHandle: "northstar-07", quoteCents: 16200, etaMinutes: 115, note: "Standard visual and geo attestation route.", status: "open" },
 ] as const;
 
+const sandboxRelayHandles: string[] = sandboxRelays.map((relay) => relay.handle);
+const sandboxOrderRefs: string[] = sandboxOrders.map((order) => order.externalRef);
+
+const globalForSandbox = globalThis as typeof globalThis & {
+  __certiferaSandboxSeed?: Promise<void>;
+};
+
+/**
+ * Off in production, on everywhere else.
+ *
+ * Preview deployments build with NODE_ENV=production but exist to be demoed,
+ * so NODE_ENV alone would strip their seed data. CERTIFERA_SANDBOX_SEED
+ * overrides both ways: set it to "true" on a production deployment whose
+ * public demo walkthrough (/api/demo/api-key) should land on seeded example
+ * requests, or to "false" to keep a preview clean.
+ */
+function sandboxSeedEnabled() {
+  const configured = process.env.CERTIFERA_SANDBOX_SEED;
+  if (configured === "true") return true;
+  if (configured === "false") return false;
+  return process.env.VERCEL_ENV === "preview" || process.env.NODE_ENV !== "production";
+}
+
+/**
+ * Seeds at most once per process, on the first request an instance serves.
+ *
+ * The memo holds the in-flight promise rather than a "done" flag: several
+ * requests can hit a cold instance at once, and without a shared promise each
+ * would run the whole seed, with the concurrent ON CONFLICT inserts contending
+ * for the same rows. A rejected seed is evicted so the next request retries
+ * instead of the instance being permanently unseeded.
+ */
 export async function ensureSandboxData() {
+  if (!sandboxSeedEnabled()) return;
+  globalForSandbox.__certiferaSandboxSeed ??= seedSandboxData().catch((error) => {
+    globalForSandbox.__certiferaSandboxSeed = undefined;
+    throw error;
+  });
+  await globalForSandbox.__certiferaSandboxSeed;
+}
+
+/** Tests and long-lived scripts re-seed deliberately; requests never do. */
+export function resetSandboxSeedCache() {
+  globalForSandbox.__certiferaSandboxSeed = undefined;
+}
+
+async function seedSandboxData() {
   await db.insert(relays).values([...sandboxRelays]).onConflictDoNothing({ target: relays.handle });
   await Promise.all(sandboxRelays.map((relay) => db.update(relays).set({
     coverageCategories: relay.coverageCategories,
@@ -63,7 +109,10 @@ export async function ensureSandboxData() {
     lastHeartbeatAt: new Date(),
   }).where(eq(relays.handle, relay.handle))));
 
-  const relayRows = await db.select({ id: relays.id, handle: relays.handle }).from(relays);
+  // Scoped to the seeded handles/refs: an unfiltered read of relays,
+  // work_orders, or execution_events scans the whole production table, and
+  // work_orders is the fastest-growing one.
+  const relayRows = await db.select({ id: relays.id, handle: relays.handle }).from(relays).where(inArray(relays.handle, sandboxRelayHandles));
   const relayIds = new Map(relayRows.map((relay) => [relay.handle, relay.id]));
 
   await Promise.all(
@@ -91,7 +140,7 @@ export async function ensureSandboxData() {
     .set({ selectedRelayId: null, updatedAt: new Date() })
     .where(and(inArray(workOrders.externalRef, openSandboxRefs), eq(workOrders.status, "open")));
 
-  const orderRows = await db.select({ id: workOrders.id, externalRef: workOrders.externalRef }).from(workOrders);
+  const orderRows = await db.select({ id: workOrders.id, externalRef: workOrders.externalRef }).from(workOrders).where(inArray(workOrders.externalRef, sandboxOrderRefs));
   const orderIds = new Map(orderRows.map((order) => [order.externalRef, order.id]));
 
   await Promise.all(
@@ -115,7 +164,10 @@ export async function ensureSandboxData() {
     }),
   );
 
-  const eventRows = await db.select({ workOrderId: executionEvents.workOrderId }).from(executionEvents);
+  const eventRows = await db
+    .select({ workOrderId: executionEvents.workOrderId })
+    .from(executionEvents)
+    .where(inArray(executionEvents.workOrderId, [...orderIds.values()]));
   const ordersWithEvents = new Set(eventRows.map((event) => event.workOrderId));
   await Promise.all(
     sandboxOrders.flatMap((order) => {
