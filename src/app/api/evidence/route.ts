@@ -108,7 +108,13 @@ export async function DELETE(request: Request) {
   if (!auth.identity) return auth.response;
   try {
     const id = new URL(request.url).searchParams.get("id") || "";
-    const [asset] = await db.select().from(evidenceAssets).where(and(eq(evidenceAssets.id, id), isNull(evidenceAssets.deletedAt))).limit(1);
+    // Never select content_base64 here: in database storage mode that column
+    // holds the whole file, and a soft delete has no use for the bytes.
+    const [asset] = await db
+      .select({ id: evidenceAssets.id, workOrderId: evidenceAssets.workOrderId, storageProvider: evidenceAssets.storageProvider, storageKey: evidenceAssets.storageKey })
+      .from(evidenceAssets)
+      .where(and(eq(evidenceAssets.id, id), isNull(evidenceAssets.deletedAt)))
+      .limit(1);
     if (!asset) return Response.json({ error: "Evidence asset not found." }, { status: 404 });
     await deletePrivateEvidence(asset);
     await db.update(evidenceAssets).set({ deletedAt: new Date() }).where(eq(evidenceAssets.id, id));

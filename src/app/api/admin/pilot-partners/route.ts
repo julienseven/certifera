@@ -1,7 +1,11 @@
 import { db } from "@/db";
 import { pilotPartners } from "@/db/schema";
+import { resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { desc, eq } from "drizzle-orm";
+
+const DEFAULT_PARTNERS = 200;
+const MAX_PARTNERS = 500;
 
 function value(body: Record<string, unknown>, key: string, max: number) {
   return typeof body[key] === "string" ? body[key].trim().slice(0, max) : "";
@@ -13,7 +17,7 @@ const contractStatuses = new Set(["pending", "signed", "expired"]);
 export async function GET(request: Request) {
   const auth = await requireIdentity(request, { roles: ["admin", "operator"] });
   if (!auth.identity) return auth.response;
-  const partners = await db.select().from(pilotPartners).orderBy(desc(pilotPartners.createdAt));
+  const partners = await db.select().from(pilotPartners).orderBy(desc(pilotPartners.createdAt)).limit(resolveLimit(request, DEFAULT_PARTNERS, MAX_PARTNERS));
   return Response.json({ partners });
 }
 

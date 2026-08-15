@@ -1,8 +1,18 @@
 import { db } from "@/db";
 import { pilotCohortPartners, pilotCohortRelays, pilotCohorts, pilotPartners, relays, workOrders } from "@/db/schema";
+import { resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { evaluateCohortEligibility } from "@/lib/cohort";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, sum } from "drizzle-orm";
+
+// evaluateCohortEligibility runs two queries per cohort, so the cohort cap also
+// bounds the fan-out, not just the rows returned.
+const DEFAULT_COHORTS = 50;
+const MAX_COHORTS = 200;
+const MAX_PARTNERS = 500;
+const MAX_RELAYS = 500;
+
+const inFlightStatuses = new Set(["matched", "review"]);
 
 function value(body: Record<string, unknown>, key: string, max: number) {
   return typeof body[key] === "string" ? body[key].trim().slice(0, max) : "";
@@ -15,28 +25,40 @@ function idList(value: unknown) {
 export async function GET(request: Request) {
   const auth = await requireIdentity(request, { roles: ["admin", "operator"] });
   if (!auth.identity) return auth.response;
-  const [cohorts, partners, relayRows, tasks, cohortPartnerRows, cohortRelayRows] = await Promise.all([
-    db.select().from(pilotCohorts).orderBy(desc(pilotCohorts.createdAt)),
-    db.select().from(pilotPartners).orderBy(desc(pilotPartners.createdAt)),
-    db.select().from(relays).where(eq(relays.active, true)).orderBy(desc(relays.reputation)),
-    db.select({ id: workOrders.id, pilotCohortId: workOrders.pilotCohortId, status: workOrders.status, rewardCents: workOrders.rewardCents }).from(workOrders),
-    db.select().from(pilotCohortPartners),
-    db.select().from(pilotCohortRelays),
+  const [cohorts, partners, relayRows, taskTotals] = await Promise.all([
+    db.select().from(pilotCohorts).orderBy(desc(pilotCohorts.createdAt)).limit(resolveLimit(request, DEFAULT_COHORTS, MAX_COHORTS)),
+    db.select().from(pilotPartners).orderBy(desc(pilotPartners.createdAt)).limit(MAX_PARTNERS),
+    db.select().from(relays).where(eq(relays.active, true)).orderBy(desc(relays.reputation)).limit(MAX_RELAYS),
+    // Rolled up in SQL rather than by reading every cohort work order into the
+    // function: the result is one row per cohort and status either way.
+    db
+      .select({ cohortId: workOrders.pilotCohortId, status: workOrders.status, tasks: count(), rewardCents: sum(workOrders.rewardCents) })
+      .from(workOrders)
+      .where(isNotNull(workOrders.pilotCohortId))
+      .groupBy(workOrders.pilotCohortId, workOrders.status),
   ]);
+  const cohortIds = cohorts.map((cohort) => cohort.id);
+  const [cohortPartnerRows, cohortRelayRows] = cohortIds.length
+    ? await Promise.all([
+        db.select().from(pilotCohortPartners).where(inArray(pilotCohortPartners.cohortId, cohortIds)),
+        db.select().from(pilotCohortRelays).where(inArray(pilotCohortRelays.cohortId, cohortIds)),
+      ])
+    : [[], []];
   const enriched = await Promise.all(cohorts.map(async (cohort) => {
     const partnerIds = cohortPartnerRows.filter((item) => item.cohortId === cohort.id).map((item) => item.partnerId);
     const relayIds = cohortRelayRows.filter((item) => item.cohortId === cohort.id).map((item) => item.relayId);
-    const cohortTasks = tasks.filter((task) => task.pilotCohortId === cohort.id);
+    const totals = taskTotals.filter((row) => row.cohortId === cohort.id);
+    const tasksIn = (match: (status: string) => boolean) => totals.filter((row) => match(row.status)).reduce((total, row) => total + row.tasks, 0);
     return {
       ...cohort,
       partnerIds,
       relayIds,
       metrics: {
-        tasks: cohortTasks.length,
-        open: cohortTasks.filter((task) => task.status === "open").length,
-        inFlight: cohortTasks.filter((task) => ["matched", "review"].includes(task.status)).length,
-        settled: cohortTasks.filter((task) => task.status === "verified").length,
-        rewardCents: cohortTasks.reduce((sum, task) => sum + task.rewardCents, 0),
+        tasks: tasksIn(() => true),
+        open: tasksIn((status) => status === "open"),
+        inFlight: tasksIn((status) => inFlightStatuses.has(status)),
+        settled: tasksIn((status) => status === "verified"),
+        rewardCents: totals.reduce((total, row) => total + Number(row.rewardCents ?? 0), 0),
       },
       eligibility: await evaluateCohortEligibility(cohort.id),
     };

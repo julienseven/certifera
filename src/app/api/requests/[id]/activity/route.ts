@@ -1,8 +1,15 @@
 import { db } from "@/db";
 import { executionEvents, payouts, relays, reputationEvents, workOrders } from "@/db/schema";
+import { decodeCursor, encodeCursor, resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity } from "@/lib/auth";
 import { ensureSandboxData } from "@/lib/sandbox";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+
+const DEFAULT_EVENTS = 100;
+const MAX_EVENTS = 500;
+// One reputation event per review decision on this outcome; a dispute/reopen
+// loop is the only way to accumulate more, so a flat cap needs no cursor.
+const MAX_REPUTATION_EVENTS = 100;
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireIdentity(request);
@@ -10,6 +17,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     await ensureSandboxData();
     const { id } = await context.params;
+    const limit = resolveLimit(request, DEFAULT_EVENTS, MAX_EVENTS);
+    const cursor = decodeCursor(new URL(request.url).searchParams.get("cursor"));
+    if (cursor === "invalid") return Response.json({ error: "Use the cursor returned by the previous page of activity." }, { status: 400 });
     const [workOrder] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.id, id)).limit(1);
     if (!workOrder) return Response.json({ error: "This request no longer exists." }, { status: 404 });
 
@@ -24,8 +34,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
           createdAt: executionEvents.createdAt,
         })
         .from(executionEvents)
-        .where(eq(executionEvents.workOrderId, id))
-        .orderBy(desc(executionEvents.createdAt)),
+        .where(cursor
+          ? and(
+              eq(executionEvents.workOrderId, id),
+              sql`(${executionEvents.createdAt}, ${executionEvents.id}) < (${cursor.createdAt}, ${cursor.id}::uuid)`,
+            )
+          : eq(executionEvents.workOrderId, id))
+        .orderBy(desc(executionEvents.createdAt), desc(executionEvents.id))
+        .limit(limit),
       db
         .select({
           id: payouts.id,
@@ -56,10 +72,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         .from(reputationEvents)
         .innerJoin(relays, eq(reputationEvents.relayId, relays.id))
         .where(eq(reputationEvents.workOrderId, id))
-        .orderBy(desc(reputationEvents.createdAt)),
+        .orderBy(desc(reputationEvents.createdAt))
+        .limit(MAX_REPUTATION_EVENTS),
     ]);
 
-    return Response.json({ events, payout: payout[0] || null, reputation });
+    const nextCursor = events.length === limit ? encodeCursor(events[events.length - 1]) : null;
+    return Response.json({ events, nextCursor, payout: payout[0] || null, reputation });
   } catch (error) {
     console.error("activity feed failed", error);
     return Response.json({ error: "The lifecycle activity is temporarily unavailable." }, { status: 500 });

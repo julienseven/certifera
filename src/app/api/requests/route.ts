@@ -1,10 +1,14 @@
 import { db } from "@/db";
 import { pilotCohorts, pilotPartners, relays, workOrders } from "@/db/schema";
+import { decodeCursor, encodeCursor, resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { partnerBelongsToCohort } from "@/lib/cohort";
 import { recordLifecycleEvent } from "@/lib/lifecycle";
 import { ensureSandboxData } from "@/lib/sandbox";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+
+const DEFAULT_REQUESTS = 100;
+const MAX_REQUESTS = 500;
 
 const categories = new Set(["Infrastructure", "Field verification", "Climate data", "Delivery"]);
 const defaultRequirements: Record<string, string[]> = {
@@ -23,6 +27,17 @@ export async function GET(request: Request) {
   if (!auth.identity) return auth.response;
   try {
     await ensureSandboxData();
+    const url = new URL(request.url);
+    const limit = resolveLimit(request, DEFAULT_REQUESTS, MAX_REQUESTS);
+    const cursor = decodeCursor(url.searchParams.get("cursor"));
+    if (cursor === "invalid") return Response.json({ error: "Use the cursor returned by the previous page of requests." }, { status: 400 });
+    // An unfiltered feed cannot use work_orders_status_created_at_idx; passing
+    // ?status= narrows it to an index scan instead of a full-table top-N sort.
+    const status = (url.searchParams.get("status") || "").trim().slice(0, 20);
+    const filters = [
+      ...(status ? [eq(workOrders.status, status)] : []),
+      ...(cursor ? [sql`(${workOrders.createdAt}, ${workOrders.id}) < (${cursor.createdAt}, ${cursor.id}::uuid)`] : []),
+    ];
     const rows = await db
       .select({
         id: workOrders.id,
@@ -48,9 +63,12 @@ export async function GET(request: Request) {
       })
       .from(workOrders)
       .leftJoin(relays, eq(workOrders.selectedRelayId, relays.id))
-      .orderBy(desc(workOrders.createdAt));
+      .where(filters.length ? and(...filters) : undefined)
+      .orderBy(desc(workOrders.createdAt), desc(workOrders.id))
+      .limit(limit);
 
-    return Response.json({ requests: rows });
+    const nextCursor = rows.length === limit ? encodeCursor(rows[rows.length - 1]) : null;
+    return Response.json({ requests: rows, nextCursor });
   } catch (error) {
     console.error("request feed failed", error);
     return Response.json({ error: "The request feed is temporarily unavailable." }, { status: 500 });

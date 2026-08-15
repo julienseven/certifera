@@ -1,8 +1,14 @@
 import { db } from "@/db";
 import { relays, workOrders } from "@/db/schema";
+import { resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity } from "@/lib/auth";
 import { rankDispatchCandidates } from "@/lib/dispatch";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
+
+// The ranker discards anything that is not available, so filtering in SQL costs
+// nothing and keeps the whole roster from crossing the wire on every preflight.
+const DEFAULT_CANDIDATES = 200;
+const MAX_CANDIDATES = 500;
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireIdentity(request, { roles: ["admin", "operator", "reviewer"] });
@@ -14,7 +20,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const network = await db
       .select({ id: relays.id, handle: relays.handle, zone: relays.zone, specialty: relays.specialty, coverageCategories: relays.coverageCategories, availabilityStatus: relays.availabilityStatus, serviceRadiusKm: relays.serviceRadiusKm, reputation: relays.reputation, lastHeartbeatAt: relays.lastHeartbeatAt })
       .from(relays)
-      .where(eq(relays.active, true));
+      .where(and(eq(relays.active, true), eq(relays.availabilityStatus, "available")))
+      .orderBy(desc(relays.reputation))
+      .limit(resolveLimit(request, DEFAULT_CANDIDATES, MAX_CANDIDATES));
     const candidates = rankDispatchCandidates({ category: workOrder.category, location: workOrder.location, relays: network });
     return Response.json({ request: { id: workOrder.id, category: workOrder.category, location: workOrder.location, status: workOrder.status }, candidates });
   } catch (error) {

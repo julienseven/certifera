@@ -1,8 +1,12 @@
 import { db } from "@/db";
 import { pilotCohorts, pilotCohortPartners, pilotPartners, taskTemplates, workOrders } from "@/db/schema";
+import { resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { recordLifecycleEvent } from "@/lib/lifecycle";
 import { and, desc, eq } from "drizzle-orm";
+
+const DEFAULT_TEMPLATES = 200;
+const MAX_TEMPLATES = 500;
 
 const categories = new Set(["Infrastructure", "Field verification", "Climate data", "Delivery"]);
 
@@ -47,7 +51,8 @@ export async function GET(request: Request) {
     .from(taskTemplates)
     .innerJoin(pilotCohorts, eq(taskTemplates.cohortId, pilotCohorts.id))
     .innerJoin(pilotPartners, eq(taskTemplates.partnerId, pilotPartners.id))
-    .orderBy(desc(taskTemplates.createdAt));
+    .orderBy(desc(taskTemplates.createdAt))
+    .limit(resolveLimit(request, DEFAULT_TEMPLATES, MAX_TEMPLATES));
   return Response.json({ templates });
 }
 

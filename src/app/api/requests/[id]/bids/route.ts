@@ -1,9 +1,16 @@
 import { db } from "@/db";
 import { relayBids, relays, workOrders } from "@/db/schema";
+import { resolveLimit } from "@/app/api/_pagination";
 import { hasRole, requireIdentity, writeAudit } from "@/lib/auth";
 import { calculateExecutionDueAt, recordLifecycleEvent } from "@/lib/lifecycle";
 import { ensureSandboxData } from "@/lib/sandbox";
 import { and, asc, eq } from "drizzle-orm";
+
+// One open bid per relay per outcome, so the book is bounded by roster size —
+// which is still unbounded over time. Cheapest quotes first, so the truncated
+// tail is the part an operator would never select anyway.
+const DEFAULT_BIDS = 100;
+const MAX_BIDS = 500;
 
 function stringValue(value: unknown, maxLength: number) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -41,7 +48,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       .from(relayBids)
       .innerJoin(relays, eq(relayBids.relayId, relays.id))
       .where(eq(relayBids.workOrderId, id))
-      .orderBy(asc(relayBids.quoteCents), asc(relayBids.etaMinutes));
+      .orderBy(asc(relayBids.quoteCents), asc(relayBids.etaMinutes))
+      .limit(resolveLimit(request, DEFAULT_BIDS, MAX_BIDS));
 
     return Response.json({ bids });
   } catch (error) {

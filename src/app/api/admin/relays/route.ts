@@ -1,7 +1,11 @@
 import { db } from "@/db";
 import { relays } from "@/db/schema";
+import { resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { desc, eq } from "drizzle-orm";
+
+const DEFAULT_RELAYS = 200;
+const MAX_RELAYS = 500;
 
 const categories = new Set(["Infrastructure", "Field verification", "Climate data", "Delivery"]);
 const availability = new Set(["available", "busy", "offline"]);
@@ -18,7 +22,7 @@ function categoriesValue(value: unknown) {
 export async function GET(request: Request) {
   const auth = await requireIdentity(request, { roles: ["admin", "operator"] });
   if (!auth.identity) return auth.response;
-  const rows = await db.select().from(relays).orderBy(desc(relays.createdAt));
+  const rows = await db.select().from(relays).orderBy(desc(relays.createdAt)).limit(resolveLimit(request, DEFAULT_RELAYS, MAX_RELAYS));
   return Response.json({ relays: rows });
 }
 

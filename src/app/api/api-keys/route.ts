@@ -1,7 +1,11 @@
 import { db } from "@/db";
 import { apiKeys } from "@/db/schema";
+import { resolveLimit } from "@/app/api/_pagination";
 import { createApiToken, requireIdentity, writeAudit } from "@/lib/auth";
 import { desc, eq } from "drizzle-orm";
+
+const DEFAULT_KEYS = 100;
+const MAX_KEYS = 200;
 
 const availableScopes = new Set(["requests:read", "requests:write", "proofs:read", "proofs:write"]);
 
@@ -12,7 +16,8 @@ export async function GET(request: Request) {
     .select({ id: apiKeys.id, name: apiKeys.name, prefix: apiKeys.prefix, scopes: apiKeys.scopes, lastUsedAt: apiKeys.lastUsedAt, expiresAt: apiKeys.expiresAt, revokedAt: apiKeys.revokedAt, createdAt: apiKeys.createdAt })
     .from(apiKeys)
     .where(eq(apiKeys.userId, auth.identity.userId))
-    .orderBy(desc(apiKeys.createdAt));
+    .orderBy(desc(apiKeys.createdAt))
+    .limit(resolveLimit(request, DEFAULT_KEYS, MAX_KEYS));
   return Response.json({ keys });
 }
 
