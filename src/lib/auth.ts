@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { apiKeys, apiRateLimits, auditLogs, sessions, users } from "@/db/schema";
+import { knownBreach, rememberBreach } from "@/lib/rate-limit-cache";
 
 const scrypt = promisify(scryptCallback);
 const SESSION_COOKIE = "certifera_session";
@@ -279,8 +280,16 @@ function rateLimitForRoute(route: string) {
 }
 
 export async function enforceRateLimit(input: { subject: string; route: string; limit?: number }) {
-  const windowStart = new Date(Math.floor(Date.now() / 60_000) * 60_000);
+  const now = Date.now();
   const limit = input.limit ?? rateLimitForRoute(input.route);
+
+  // Already refused in this window: the count only rises, so the shared counter
+  // cannot produce a different answer, and querying it again would buy a row
+  // lock on the hot bucket purely to be told the same thing.
+  const cached = knownBreach(input.subject, input.route, now);
+  if (cached !== null) return { allowed: false, remaining: 0, retryAfter: cached };
+
+  const windowStart = new Date(Math.floor(now / 60_000) * 60_000);
   const [row] = await db
     .insert(apiRateLimits)
     .values({ subject: input.subject, route: input.route, windowStart, count: 1, updatedAt: new Date() })
@@ -289,7 +298,9 @@ export async function enforceRateLimit(input: { subject: string; route: string; 
       set: { count: sql`${apiRateLimits.count} + 1`, updatedAt: new Date() },
     })
     .returning({ count: apiRateLimits.count });
-  return { allowed: row.count <= limit, remaining: Math.max(0, limit - row.count), retryAfter: 60 };
+  const allowed = row.count <= limit;
+  if (!allowed) rememberBreach(input.subject, input.route, now);
+  return { allowed, remaining: Math.max(0, limit - row.count), retryAfter: 60 };
 }
 
 export async function enforceAnonymousRateLimit(request: Request, bucket: string, limit: number) {
@@ -297,9 +308,48 @@ export async function enforceAnonymousRateLimit(request: Request, bucket: string
   return enforceRateLimit({ subject: `ip:${hashValue(forwarded)}`, route: `auth:${bucket}`, limit });
 }
 
+/**
+ * Identifies the caller for the in-process breach cache, before the credential
+ * has been resolved to a user.
+ *
+ * Hashed, never raw: this key lives in a long-lived in-memory map, and a
+ * process dump or accidental log of it must not yield a usable token or session
+ * cookie. Returns null for an unauthenticated request, which has no stable
+ * identity to cache against and is refused by resolveIdentity anyway.
+ */
+function rateLimitCredentialKey(request: Request) {
+  const token = bearerToken(request);
+  if (token) return `key:${hashValue(token)}`;
+  const cookie = request.headers.get("cookie") || "";
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  return match?.[1] ? `session:${hashValue(decodeURIComponent(match[1]))}` : null;
+}
+
 export async function requireIdentity(request: Request, options: { roles?: Role[]; scope?: string } = {}) {
   const now = new Date();
   const route = requestRoute(request);
+
+  // Refused already in this window? Then say so without resolving the
+  // credential or charging the bucket. The counter only rises, so the shared
+  // answer cannot differ, and this is the request pattern that otherwise makes
+  // an abusive caller as expensive to serve as a legitimate one.
+  //
+  // Keyed on the presented credential rather than the resolved user, since the
+  // point is to answer before doing the lookup that would resolve it.
+  const credentialKey = rateLimitCredentialKey(request);
+  if (credentialKey) {
+    const cached = knownBreach(credentialKey, route, now.getTime());
+    if (cached !== null) {
+      return {
+        identity: null,
+        response: Response.json(
+          { error: "Rate limit exceeded. Please retry shortly." },
+          { status: 429, headers: { "retry-after": String(cached), "x-ratelimit-remaining": "0" } },
+        ),
+      };
+    }
+  }
+
   const { identity, rateCount } = await resolveIdentity(request, { route, windowStart: new Date(Math.floor(now.getTime() / 60_000) * 60_000), now });
   if (!identity) return { identity: null, response: Response.json({ error: "Authentication is required." }, { status: 401 }) };
   if (options.roles && !hasRole(identity, options.roles)) {
@@ -314,6 +364,10 @@ export async function requireIdentity(request: Request, options: { roles?: Role[
   // caller's own credential, which is the direction to err in.
   const limit = rateLimitForRoute(route);
   if (rateCount > limit) {
+    // Remembered so the next request from this credential is refused without
+    // resolving it or touching the bucket again: a caller past its limit should
+    // not keep costing the database a locked write per request.
+    if (credentialKey) rememberBreach(credentialKey, route, now.getTime());
     return {
       identity: null,
       response: Response.json(
