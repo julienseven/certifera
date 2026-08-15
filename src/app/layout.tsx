@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SITE_NAME, SITE_URL, X_HANDLE, jsonLd, organizationSchema, websiteSchema } from "@/lib/seo";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const inter = Inter({
@@ -84,7 +85,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             DefinedTermSet) is emitted per route and references these @ids. */}
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd([organizationSchema(), websiteSchema()]) }} />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
