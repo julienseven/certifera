@@ -38,7 +38,12 @@ export const relays = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   // Dispatch preflight ranks active relays by reputation.
-  (table) => [index("relays_active_reputation_idx").on(table.active, table.reputation)],
+  (table) => [
+    index("relays_active_reputation_idx").on(table.active, table.reputation),
+    // The admin roster pages newest-first; without this the bounded top-N still
+    // scans the table to sort it.
+    index("relays_created_at_idx").on(table.createdAt),
+  ],
 );
 
 export const users = pgTable(
@@ -162,7 +167,9 @@ export const deploymentChecks = pgTable("deployment_checks", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const pilotPartners = pgTable("pilot_partners", {
+export const pilotPartners = pgTable(
+  "pilot_partners",
+  {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
   requesterAlias: text("requester_alias").notNull().unique(),
@@ -174,7 +181,9 @@ export const pilotPartners = pgTable("pilot_partners", {
   contractStatus: text("contract_status").notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+  },
+  (table) => [index("pilot_partners_created_at_idx").on(table.createdAt)],
+);
 
 export const pilotCohorts = pgTable(
   "pilot_cohorts",
@@ -252,6 +261,9 @@ export const workOrders = pgTable(
   (table) => [
     // The market list: filter on status, newest first.
     index("work_orders_status_created_at_idx").on(table.status, table.createdAt),
+    // The unfiltered feed orders by created_at with no status predicate, which
+    // the composite above cannot serve because it leads on status.
+    index("work_orders_created_at_idx").on(table.createdAt),
     index("work_orders_selected_relay_id_idx").on(table.selectedRelayId),
     index("work_orders_pilot_partner_id_idx").on(table.pilotPartnerId),
     index("work_orders_pilot_cohort_id_idx").on(table.pilotCohortId),
@@ -283,6 +295,8 @@ export const relayBids = pgTable(
     // index above leads on work_order_id so it can serve a prefix scan, but not
     // the status predicate — this one does both.
     index("relay_bids_work_order_status_idx").on(table.workOrderId, table.status),
+    // Quotes are listed cheapest-first per outcome.
+    index("relay_bids_work_order_quote_idx").on(table.workOrderId, table.quoteCents),
     index("relay_bids_relay_id_idx").on(table.relayId),
   ],
 );
@@ -336,6 +350,7 @@ export const taskTemplates = pgTable(
   },
   (table) => [
     index("task_templates_cohort_id_idx").on(table.cohortId),
+    index("task_templates_created_at_idx").on(table.createdAt),
     index("task_templates_partner_id_idx").on(table.partnerId),
     index("task_templates_created_by_user_id_idx").on(table.createdByUserId),
   ],
@@ -451,6 +466,9 @@ export const payouts = pgTable(
     index("payouts_proof_bundle_id_idx").on(table.proofBundleId),
     // Reconciliation sweeps read unreleased payouts oldest-first.
     index("payouts_status_created_at_idx").on(table.status, table.createdAt),
+    // The finance export orders by created_at across all statuses, which the
+    // status-leading composite above cannot serve.
+    index("payouts_created_at_idx").on(table.createdAt),
   ],
 );
 
@@ -468,7 +486,13 @@ export const reputationEvents = pgTable(
     reason: text("reason").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("reputation_events_relay_created_at_idx").on(table.relayId, table.createdAt), index("reputation_events_work_order_id_idx").on(table.workOrderId)],
+  (table) => [
+    index("reputation_events_relay_created_at_idx").on(table.relayId, table.createdAt),
+    // Carries created_at so the per-outcome read is an index scan rather than a
+    // bitmap scan followed by a sort. Supersedes the work_order_id-only index,
+    // which this one serves as a prefix.
+    index("reputation_events_work_order_created_at_idx").on(table.workOrderId, table.createdAt),
+  ],
 );
 
 export const stripeWebhookEvents = pgTable(
