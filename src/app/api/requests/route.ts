@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { pilotCohorts, pilotPartners, relays, workOrders } from "@/db/schema";
 import { decodeCursor, encodeCursor, resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity, writeAudit } from "@/lib/auth";
+import { isStaff } from "@/lib/authz";
 import { partnerBelongsToCohort } from "@/lib/cohort";
 import { recordLifecycleEvent } from "@/lib/lifecycle";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -66,7 +67,28 @@ export async function GET(request: Request) {
       .limit(limit);
 
     const nextCursor = rows.length === limit ? encodeCursor(rows[rows.length - 1]) : null;
-    return Response.json({ requests: rows, nextCursor });
+
+    // The feed is deliberately broad: a relay has to see open outcomes to bid
+    // on them. Two columns on it are not market-public, though, and they were
+    // being returned to every authenticated caller:
+    //
+    //  - disputeReason is an operator's free-text account of why *another*
+    //    relay's proof was rejected.
+    //  - requester identifies the buyer, which for partner-funded work is the
+    //    partner's alias.
+    //
+    // Staff see the record whole. A relay sees its own outcomes whole, since
+    // being told why your own work was disputed is the point of the field, and
+    // everything else with those two columns withheld.
+    const visible = isStaff(auth.identity)
+      ? rows
+      : rows.map((row) =>
+          row.selectedRelayId && row.selectedRelayId === auth.identity.relayId
+            ? row
+            : { ...row, disputeReason: null, requester: null },
+        );
+
+    return Response.json({ requests: visible, nextCursor });
   } catch (error) {
     console.error("request feed failed", error);
     return Response.json({ error: "The request feed is temporarily unavailable." }, { status: 500 });

@@ -27,10 +27,12 @@ export type WorkOrder = {
   category: string;
   location: string;
   rewardCents: number;
-  requester: string;
+  /** Withheld (null) for relays on outcomes they were not selected for: on partner-funded work it is the buyer's alias. */
+  requester: string | null;
   status: RequestStatus;
   proofRequirements: string[];
   selectedRelayId: string | null;
+  /** Withheld (null) unless staff, or the relay whose own work is being disputed. */
   disputeReason: string | null;
   executionDueAt: string | null;
   reviewDueAt: string | null;
