@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { executionEvents, payouts, relays, reputationEvents, workOrders } from "@/db/schema";
 import { decodeCursor, encodeCursor, resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity } from "@/lib/auth";
+import { forbidden, resolveOutcomeAccess } from "@/lib/authz";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 const DEFAULT_EVENTS = 100;
@@ -20,6 +21,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (cursor === "invalid") return Response.json({ error: "Use the cursor returned by the previous page of activity." }, { status: 400 });
     const [workOrder] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.id, id)).limit(1);
     if (!workOrder) return Response.json({ error: "This request no longer exists." }, { status: 404 });
+
+    // The lifecycle is visible to anyone with a stake in this outcome, but the
+    // payout instruction is the selected relay's private economics: gross, fee,
+    // and net. It used to be returned to any authenticated caller, so a rival
+    // relay could read what the winner was paid.
+    const access = await resolveOutcomeAccess(auth.identity, id);
+    if (!access.canView) return forbidden();
 
     const [events, payout, reputation] = await Promise.all([
       db
@@ -75,7 +83,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     ]);
 
     const nextCursor = events.length === limit ? encodeCursor(events[events.length - 1]) : null;
-    return Response.json({ events, nextCursor, payout: payout[0] || null, reputation });
+    return Response.json({
+      events,
+      nextCursor,
+      payout: access.canViewCommercials ? payout[0] || null : null,
+      reputation,
+    });
   } catch (error) {
     console.error("activity feed failed", error);
     return Response.json({ error: "The lifecycle activity is temporarily unavailable." }, { status: 500 });

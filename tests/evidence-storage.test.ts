@@ -233,8 +233,12 @@ describe("scanEvidence", () => {
 });
 
 describe("evidenceStorageStatus", () => {
-  it("reports database storage as always configured", () => {
-    expect(evidenceStorageStatus()).toEqual({ provider: "database", configured: true, scanRequired: false, scannerConfigured: false });
+  it("does not report database storage as production-configured", () => {
+    // Database storage is a development fallback that base64-encodes whole
+    // files into Postgres. Reporting it as "configured" told the readiness
+    // check the deployment was ready while evidence accumulated in the primary
+    // database, its backups, and its WAL.
+    expect(evidenceStorageStatus()).toEqual({ provider: "database", configured: false, scanRequired: false, scannerConfigured: false });
   });
 
   it("reports S3 storage as unconfigured until bucket and region are both set", () => {

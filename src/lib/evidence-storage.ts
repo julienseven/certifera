@@ -10,8 +10,24 @@ type StoredEvidence = {
   contentBase64: string | null;
 };
 
+/**
+ * Where evidence bytes live.
+ *
+ * "database" base64-encodes the whole file into a Postgres row, which inflates
+ * an 8 MB upload to ~11 MB of text and carries it into every backup, every WAL
+ * segment, and every replica. It exists so a developer can run the product
+ * without object storage credentials, and it is not a production strategy.
+ *
+ * Production is required to set "s3" (enforced by lib/env at startup), so the
+ * remaining default here only ever applies to development and preview.
+ */
 function storageProvider(): EvidenceStorageProvider {
-  return process.env.CERTIFERA_EVIDENCE_STORAGE === "s3" ? "s3" : "database";
+  const configured = process.env.CERTIFERA_EVIDENCE_STORAGE;
+  if (configured === "s3") return "s3";
+  if (configured === "database") return "database";
+  // Inferred rather than silently falling back to the heavier option: a
+  // deployment that configured a bucket clearly meant to use it.
+  return process.env.CERTIFERA_S3_BUCKET && process.env.CERTIFERA_S3_REGION ? "s3" : "database";
 }
 
 function configuredS3Client() {
@@ -112,9 +128,13 @@ export async function scanEvidence(input: { bytes: Buffer; fileName: string; con
 
 export function evidenceStorageStatus() {
   const provider = storageProvider();
+  const s3Configured = Boolean(process.env.CERTIFERA_S3_BUCKET && process.env.CERTIFERA_S3_REGION);
   return {
     provider,
-    configured: provider === "database" || Boolean(process.env.CERTIFERA_S3_BUCKET && process.env.CERTIFERA_S3_REGION),
+    // Database storage is a development fallback, so it is never "configured"
+    // in the sense readiness means: reporting it as such told an operator the
+    // deployment was ready while evidence bytes were accumulating in Postgres.
+    configured: provider === "s3" && s3Configured,
     scanRequired: process.env.CERTIFERA_EVIDENCE_SCAN_REQUIRED === "true",
     scannerConfigured: Boolean(process.env.CERTIFERA_MALWARE_SCAN_WEBHOOK),
   };

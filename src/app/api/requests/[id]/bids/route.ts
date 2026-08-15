@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { relayBids, relays, workOrders } from "@/db/schema";
 import { resolveLimit } from "@/app/api/_pagination";
 import { hasRole, requireIdentity, writeAudit } from "@/lib/auth";
+import { forbidden, resolveOutcomeAccess } from "@/lib/authz";
 import { calculateExecutionDueAt, recordLifecycleEvent } from "@/lib/lifecycle";
 import { and, asc, eq } from "drizzle-orm";
 
@@ -28,6 +29,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const workOrder = await findWorkOrder(id);
     if (!workOrder) return Response.json({ error: "This request no longer exists." }, { status: 404 });
 
+    // The book is the market's private information. An operator runs the
+    // market and sees all of it; a relay sees only its own quote, because the
+    // competing quotes and ETAs here are exactly what a rival would use to
+    // underbid. Previously any authenticated caller received the whole book.
+    const access = await resolveOutcomeAccess(auth.identity, id);
+    if (!access.canView) return forbidden();
+
+    const visibility = access.canViewCommercials
+      ? eq(relayBids.workOrderId, id)
+      : and(eq(relayBids.workOrderId, id), eq(relayBids.relayId, access.relayId!));
+
     const bids = await db
       .select({
         id: relayBids.id,
@@ -45,7 +57,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       })
       .from(relayBids)
       .innerJoin(relays, eq(relayBids.relayId, relays.id))
-      .where(eq(relayBids.workOrderId, id))
+      .where(visibility)
       .orderBy(asc(relayBids.quoteCents), asc(relayBids.etaMinutes))
       .limit(resolveLimit(request, DEFAULT_BIDS, MAX_BIDS));
 

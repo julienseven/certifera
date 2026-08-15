@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { workOrders } from "@/db/schema";
 import { requireIdentity, writeAudit } from "@/lib/auth";
+import { forbidden, resolveOutcomeAccess } from "@/lib/authz";
 import { escalateOverdueSla, getSlaSnapshot } from "@/lib/sla";
 import { eq } from "drizzle-orm";
 
@@ -15,6 +16,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       .where(eq(workOrders.id, id))
       .limit(1);
     if (!workOrder) return Response.json({ error: "This request no longer exists." }, { status: 404 });
+    // Timing commitments are not commercially sensitive, but they still belong
+    // to an outcome, so the same stake test applies as everywhere else.
+    const access = await resolveOutcomeAccess(auth.identity, id);
+    if (!access.canView) return forbidden();
     return Response.json({ sla: getSlaSnapshot(workOrder) });
   } catch (error) {
     console.error("sla lookup failed", error);

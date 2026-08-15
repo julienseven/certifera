@@ -1,5 +1,14 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { assertEnvValid } from "@/lib/env";
+
+/**
+ * Validated before the pool is built, and from here specifically because every
+ * server path imports the database. A production deployment configured to
+ * settle in sandbox mode or to keep evidence in Postgres now fails at startup
+ * instead of at the first request that quietly does the wrong thing.
+ */
+assertEnvValid();
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -28,12 +37,20 @@ function intFromEnv(name: string, fallback: number) {
  */
 const poolMax = intFromEnv("DATABASE_POOL_MAX", 3);
 
-/** Railway's managed certificate is not in the Node CA bundle, so verification is opt-out. */
+/**
+ * Managed providers terminate TLS with a certificate that is not in the Node CA
+ * bundle; local Postgres has no TLS at all.
+ *
+ * Verification is on by default and must be opted *out* of. It was previously
+ * opt-in (`=== "true"`), so every deployment that did not know to set the
+ * variable accepted whatever certificate it was handed. Providers whose chain
+ * Node cannot verify set DATABASE_SSL_REJECT_UNAUTHORIZED=false deliberately.
+ */
 function sslConfig() {
   if (process.env.DATABASE_SSL === "disable") return undefined;
   const isLocal = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(databaseUrl!);
   if (isLocal && process.env.DATABASE_SSL !== "require") return undefined;
-  return { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === "true" };
+  return { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false" };
 }
 
 const globalForDb = globalThis as typeof globalThis & {

@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { evidenceAssets, proofBundles, relays, workOrders } from "@/db/schema";
 import { hasRole, requireIdentity } from "@/lib/auth";
+import { forbidden, resolveOutcomeAccess } from "@/lib/authz";
 import { calculateReviewDueAt, recordLifecycleEvent } from "@/lib/lifecycle";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
@@ -15,9 +16,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const { id } = await context.params;
     const [workOrder] = await db.select({ id: workOrders.id, selectedRelayId: workOrders.selectedRelayId }).from(workOrders).where(eq(workOrders.id, id)).limit(1);
     if (!workOrder) return Response.json({ error: "This request no longer exists." }, { status: 404 });
-    if (!hasRole(auth.identity, ["admin", "operator", "reviewer"]) && auth.identity.relayId !== workOrder.selectedRelayId) {
-      return Response.json({ error: "Relay accounts may only inspect their own proof bundles." }, { status: 403 });
-    }
+    // A proof bundle is the selected relay's submitted work. Staff review it,
+    // and the relay that produced it can inspect its own; no other relay has a
+    // reason to read it. Uses the shared stake test so this route cannot drift
+    // from the bid book and activity feed.
+    const access = await resolveOutcomeAccess(auth.identity, id);
+    if (!access.canViewCommercials) return forbidden();
 
     const [proof] = await db
       .select({
