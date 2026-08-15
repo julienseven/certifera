@@ -3,6 +3,12 @@ type TransferInput = {
   workOrderId: string;
   netCents: number;
   stripeAccountId: string | null;
+  /**
+   * The claim recorded on the payout row before this call. It is the provider
+   * idempotency key, so retrying a claim that may already have reached Stripe
+   * returns the original transfer instead of creating a second one.
+   */
+  attemptId: string;
 };
 
 export type SettlementResult = { provider: "sandbox" | "stripe"; reference: string };
@@ -10,7 +16,7 @@ export type SettlementResult = { provider: "sandbox" | "stripe"; reference: stri
 export async function releaseSettlement(input: TransferInput): Promise<SettlementResult> {
   const mode = process.env.CERTIFERA_SETTLEMENT_MODE || "sandbox";
   if (mode === "sandbox") {
-    return { provider: "sandbox", reference: `cert-sandbox-${crypto.randomUUID().slice(0, 12)}` };
+    return { provider: "sandbox", reference: `cert-sandbox-${input.attemptId.slice(0, 12)}` };
   }
 
   const stripeSecret = process.env.CERTIFERA_STRIPE_SECRET_KEY;
@@ -32,7 +38,10 @@ export async function releaseSettlement(input: TransferInput): Promise<Settlemen
     headers: {
       authorization: `Bearer ${stripeSecret}`,
       "content-type": "application/x-www-form-urlencoded",
-      "idempotency-key": `certifera-payout-${input.payoutId}`,
+      // Keyed on the claim, not the payout: a retry of the same claim is
+      // idempotent at Stripe, while a deliberate re-release after a *failed*
+      // transfer takes a new claim and is allowed to create a new transfer.
+      "idempotency-key": `certifera-payout-${input.attemptId}`,
     },
     body,
   });

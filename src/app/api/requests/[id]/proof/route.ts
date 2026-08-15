@@ -2,7 +2,6 @@ import { db } from "@/db";
 import { evidenceAssets, proofBundles, relays, workOrders } from "@/db/schema";
 import { hasRole, requireIdentity } from "@/lib/auth";
 import { calculateReviewDueAt, recordLifecycleEvent } from "@/lib/lifecycle";
-import { ensureSandboxData } from "@/lib/sandbox";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
 function compactString(value: unknown, maxLength: number) {
@@ -13,7 +12,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const auth = await requireIdentity(request);
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const [workOrder] = await db.select({ id: workOrders.id, selectedRelayId: workOrders.selectedRelayId }).from(workOrders).where(eq(workOrders.id, id)).limit(1);
     if (!workOrder) return Response.json({ error: "This request no longer exists." }, { status: 404 });
@@ -58,7 +56,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const auth = await requireIdentity(request, { roles: ["relay", "admin"], scope: "proofs:write" });
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const body = (await request.json()) as Record<string, unknown>;
     const observation = compactString(body.observation, 800);

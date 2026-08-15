@@ -113,7 +113,21 @@ CERTIFERA_SETTLEMENT_MODE=sandbox
 
 ### Stripe Connect
 
-The adapter can create a Stripe transfer only when a relay has a connected account ID and the server has an API secret. Stripe transfer calls use the payout ID as an idempotency key.
+The adapter can create a Stripe transfer only when a relay has a connected account ID and the server has an API secret. Transfers use the payout's current release attempt as the Stripe idempotency key, so retrying an interrupted attempt returns the original transfer instead of creating a second one.
+
+### Payout release states
+
+Release is ordered so that the database commits its intent before any money moves:
+
+`authorized` → `releasing` → `released` | `failed`
+
+- **`authorized`** — approval created the payout instruction; it is releasable.
+- **`releasing`** — a single caller has claimed the payout and a transfer is about to be attempted. The claim is a conditional update, so exactly one caller can hold it, and it commits *before* the provider call.
+- **`released`** — the transfer succeeded and the reference is recorded.
+- **`failed`** — the provider reported the transfer failed or was reversed.
+
+A payout is never automatically moved out of `releasing` back to `authorized`. The transfer may in fact have landed, so an automatic retry could pay twice. Stuck claims are surfaced instead: the hourly maintenance sweep raises a critical `payout_release_stuck` operational event after 15 minutes (`CERTIFERA_RELEASE_STUCK_MS`), carrying the `release_attempt_id` needed to reconcile the payout against the provider before anyone retries it.
+
 
 ```env
 CERTIFERA_SETTLEMENT_MODE=stripe

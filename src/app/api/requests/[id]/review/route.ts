@@ -2,7 +2,6 @@ import { db } from "@/db";
 import { payouts, proofBundles, relayBids, relays, reputationEvents, workOrders } from "@/db/schema";
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { calculatePayout, recordLifecycleEvent, REPUTATION_DISPUTE_PENALTY, REPUTATION_REWARD } from "@/lib/lifecycle";
-import { ensureSandboxData } from "@/lib/sandbox";
 import { and, desc, eq } from "drizzle-orm";
 
 function compactString(value: unknown, maxLength: number) {
@@ -23,7 +22,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const auth = await requireIdentity(request, { roles: ["operator", "reviewer", "admin"] });
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const body = (await request.json()) as Record<string, unknown>;
     const decision = compactString(body.decision, 20);

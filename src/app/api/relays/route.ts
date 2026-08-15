@@ -2,7 +2,6 @@ import { db } from "@/db";
 import { relays } from "@/db/schema";
 import { resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity } from "@/lib/auth";
-import { ensureSandboxData } from "@/lib/sandbox";
 import { desc, eq } from "drizzle-orm";
 
 const DEFAULT_RELAYS = 200;
@@ -12,7 +11,6 @@ export async function GET(request: Request) {
   const auth = await requireIdentity(request);
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const network = await db
       .select({
         id: relays.id,

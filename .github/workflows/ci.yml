@@ -37,8 +37,21 @@ jobs:
         run: npx next typegen
       - name: TypeScript validation
         run: npm exec tsc -- --noEmit --pretty false
-      - name: Push database schema
-        run: npx drizzle-kit push --force
+      - name: Apply database migrations
+        run: npm run db:migrate
+      - name: Verify migrations match schema.ts
+        # `generate` writes a new file when the committed migrations do not
+        # reproduce schema.ts. A dirty tree here means someone edited the schema
+        # without generating the migration that carries the change to
+        # production, which push --force used to paper over at deploy time.
+        run: |
+          npx drizzle-kit check
+          npx drizzle-kit generate --name ci_drift_check
+          if [ -n "$(git status --porcelain -- drizzle)" ]; then
+            echo "::error::schema.ts has drifted from ./drizzle. Run 'npm run db:generate' and commit the migration."
+            git --no-pager status --porcelain -- drizzle
+            exit 1
+          fi
       - name: Unit tests
         run: npx vitest run
       - name: Production build

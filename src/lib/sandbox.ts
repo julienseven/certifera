@@ -56,50 +56,21 @@ const sandboxBids = [
 const sandboxRelayHandles: string[] = sandboxRelays.map((relay) => relay.handle);
 const sandboxOrderRefs: string[] = sandboxOrders.map((order) => order.externalRef);
 
-const globalForSandbox = globalThis as typeof globalThis & {
-  __certiferaSandboxSeed?: Promise<void>;
-};
-
 /**
- * Off in production, on everywhere else.
+ * Seeds the demonstration relays, outcomes, bids, and lifecycle events.
  *
- * Preview deployments build with NODE_ENV=production but exist to be demoed,
- * so NODE_ENV alone would strip their seed data. CERTIFERA_SANDBOX_SEED
- * overrides both ways: set it to "true" on a production deployment whose
- * public demo walkthrough (/api/demo/api-key) should land on seeded example
- * requests, or to "false" to keep a preview clean.
- */
-function sandboxSeedEnabled() {
-  const configured = process.env.CERTIFERA_SANDBOX_SEED;
-  if (configured === "true") return true;
-  if (configured === "false") return false;
-  return process.env.VERCEL_ENV === "preview" || process.env.NODE_ENV !== "production";
-}
-
-/**
- * Seeds at most once per process, on the first request an instance serves.
+ * Run deliberately, through `npm run db:seed:sandbox`. This was previously
+ * reachable from request handling via ensureSandboxData(), which meant seven
+ * API routes each awaited a 17-statement seed before serving their first
+ * request on a cold instance, and demo rows were written into the same tables
+ * as real data as a side effect of ordinary traffic.
  *
- * The memo holds the in-flight promise rather than a "done" flag: several
- * requests can hit a cold instance at once, and without a shared promise each
- * would run the whole seed, with the concurrent ON CONFLICT inserts contending
- * for the same rows. A rejected seed is evicted so the next request retries
- * instead of the instance being permanently unseeded.
+ * Every write is idempotent, so re-running is safe. Reads are scoped to the
+ * seeded handles and refs: an unfiltered read of relays, work_orders, or
+ * execution_events scans the whole table, and work_orders is the
+ * fastest-growing one.
  */
-export async function ensureSandboxData() {
-  if (!sandboxSeedEnabled()) return;
-  globalForSandbox.__certiferaSandboxSeed ??= seedSandboxData().catch((error) => {
-    globalForSandbox.__certiferaSandboxSeed = undefined;
-    throw error;
-  });
-  await globalForSandbox.__certiferaSandboxSeed;
-}
-
-/** Tests and long-lived scripts re-seed deliberately; requests never do. */
-export function resetSandboxSeedCache() {
-  globalForSandbox.__certiferaSandboxSeed = undefined;
-}
-
-async function seedSandboxData() {
+export async function seedSandboxData() {
   await db.insert(relays).values([...sandboxRelays]).onConflictDoNothing({ target: relays.handle });
   await Promise.all(sandboxRelays.map((relay) => db.update(relays).set({
     coverageCategories: relay.coverageCategories,

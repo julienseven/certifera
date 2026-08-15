@@ -3,7 +3,6 @@ import { relayBids, relays, workOrders } from "@/db/schema";
 import { resolveLimit } from "@/app/api/_pagination";
 import { hasRole, requireIdentity, writeAudit } from "@/lib/auth";
 import { calculateExecutionDueAt, recordLifecycleEvent } from "@/lib/lifecycle";
-import { ensureSandboxData } from "@/lib/sandbox";
 import { and, asc, eq } from "drizzle-orm";
 
 // One open bid per relay per outcome, so the book is bounded by roster size —
@@ -25,7 +24,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const auth = await requireIdentity(request);
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const workOrder = await findWorkOrder(id);
     if (!workOrder) return Response.json({ error: "This request no longer exists." }, { status: 404 });
@@ -62,7 +60,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const auth = await requireIdentity(request, { roles: ["relay", "admin"], scope: "requests:write" });
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const body = (await request.json()) as Record<string, unknown>;
     const relayId = stringValue(body.relayId, 64);

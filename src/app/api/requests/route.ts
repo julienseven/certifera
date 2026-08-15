@@ -4,7 +4,6 @@ import { decodeCursor, encodeCursor, resolveLimit } from "@/app/api/_pagination"
 import { requireIdentity, writeAudit } from "@/lib/auth";
 import { partnerBelongsToCohort } from "@/lib/cohort";
 import { recordLifecycleEvent } from "@/lib/lifecycle";
-import { ensureSandboxData } from "@/lib/sandbox";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 const DEFAULT_REQUESTS = 100;
@@ -26,7 +25,6 @@ export async function GET(request: Request) {
   const auth = await requireIdentity(request);
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const url = new URL(request.url);
     const limit = resolveLimit(request, DEFAULT_REQUESTS, MAX_REQUESTS);
     const cursor = decodeCursor(url.searchParams.get("cursor"));

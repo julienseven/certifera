@@ -1,10 +1,20 @@
 import { db } from "@/db";
-import { apiKeys, apiRateLimits, emailVerificationTokens, maintenanceRuns, passwordResetTokens, sessions, workOrders } from "@/db/schema";
+import { apiKeys, apiRateLimits, emailVerificationTokens, maintenanceRuns, passwordResetTokens, payouts, sessions, workOrders } from "@/db/schema";
 import { recordOperationalEvent, reportException } from "@/lib/observability";
 import { escalateOverdueSla } from "@/lib/sla";
 import { and, eq, lt, or } from "drizzle-orm";
 
 const DEMO_API_KEY_NAME = "Demo (auto-issued)";
+
+/**
+ * How long a payout may sit claimed for release before it is treated as stuck.
+ *
+ * A row in "releasing" means a transfer was about to be attempted at the
+ * provider. It is deliberately never auto-reverted to "authorized": doing so
+ * could double-pay if the transfer did in fact land. It is surfaced instead, so
+ * a human reconciles it against the provider using its release_attempt_id.
+ */
+const RELEASE_CLAIM_STUCK_MS = Number.parseInt(process.env.CERTIFERA_RELEASE_STUCK_MS ?? "", 10) || 15 * 60 * 1000;
 
 /**
  * Ceiling on SLA escalations per run. Each escalation is its own transaction, so
@@ -45,11 +55,33 @@ export async function runMaintenance(trigger: string) {
       // user might still want an audit trail for after it expires.
       db.delete(apiKeys).where(and(eq(apiKeys.name, DEMO_API_KEY_NAME), lt(apiKeys.expiresAt, now))).returning({ id: apiKeys.id }),
     ]);
+    const stuckReleases = await db
+      .select({ id: payouts.id, releaseAttemptId: payouts.releaseAttemptId, releaseClaimedAt: payouts.releaseClaimedAt, netCents: payouts.netCents })
+      .from(payouts)
+      .where(and(eq(payouts.status, "releasing"), lt(payouts.releaseClaimedAt, new Date(now.getTime() - RELEASE_CLAIM_STUCK_MS))))
+      .limit(MAX_ESCALATIONS_PER_RUN);
+    for (const payout of stuckReleases) {
+      await recordOperationalEvent({
+        level: "critical",
+        service: "settlement",
+        code: "payout_release_stuck",
+        message: "A payout has been claimed for release without resolving. Reconcile it against the settlement provider before retrying.",
+        resourceType: "payout",
+        resourceId: payout.id,
+        data: {
+          attemptId: payout.releaseAttemptId,
+          claimedAt: payout.releaseClaimedAt?.toISOString() ?? null,
+          netCents: payout.netCents,
+        },
+      });
+    }
+
     const result = {
       overdueChecked: batch.length,
       overdueRemaining,
       executionReopened,
       reviewEscalated,
+      stuckReleases: stuckReleases.length,
       expiredSessionsDeleted: expiredSessions.length,
       expiredVerificationTokensDeleted: expiredVerification.length,
       expiredResetTokensDeleted: expiredResets.length,

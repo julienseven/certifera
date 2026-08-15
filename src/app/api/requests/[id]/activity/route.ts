@@ -2,7 +2,6 @@ import { db } from "@/db";
 import { executionEvents, payouts, relays, reputationEvents, workOrders } from "@/db/schema";
 import { decodeCursor, encodeCursor, resolveLimit } from "@/app/api/_pagination";
 import { requireIdentity } from "@/lib/auth";
-import { ensureSandboxData } from "@/lib/sandbox";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 const DEFAULT_EVENTS = 100;
@@ -15,7 +14,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const auth = await requireIdentity(request);
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const limit = resolveLimit(request, DEFAULT_EVENTS, MAX_EVENTS);
     const cursor = decodeCursor(new URL(request.url).searchParams.get("cursor"));

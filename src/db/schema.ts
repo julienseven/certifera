@@ -451,7 +451,19 @@ export const payouts = pgTable(
     grossCents: integer("gross_cents").notNull(),
     protocolFeeCents: integer("protocol_fee_cents").notNull(),
     netCents: integer("net_cents").notNull(),
+    /**
+     * authorized -> releasing -> released | failed.
+     *
+     * "releasing" is the durable record that a transfer is about to be
+     * attempted at the provider. It is committed before the provider call so a
+     * crash mid-transfer is recoverable: the row names an in-flight attempt
+     * rather than reverting to a state a second caller would happily re-release.
+     */
     status: text("status").notNull().default("authorized"),
+    /** Set when the row is claimed for release; bounds how long a "releasing" row may sit before the reconciler adopts it. */
+    releaseClaimedAt: timestamp("release_claimed_at", { withTimezone: true }),
+    /** Sent to the provider as the idempotency key, so a retry of a claim cannot produce a second transfer. */
+    releaseAttemptId: uuid("release_attempt_id"),
     settlementProvider: text("settlement_provider").notNull().default("sandbox"),
     settlementRef: text("settlement_ref"),
     providerEventId: text("provider_event_id"),

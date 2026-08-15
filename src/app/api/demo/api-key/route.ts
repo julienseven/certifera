@@ -2,7 +2,6 @@ import { db } from "@/db";
 import { apiKeys } from "@/db/schema";
 import { createApiToken, enforceAnonymousRateLimit, writeAudit } from "@/lib/auth";
 import { ensureDemoIdentities } from "@/lib/demo";
-import { ensureSandboxData } from "@/lib/sandbox";
 
 const DEMO_KEY_NAME = "Demo (auto-issued)";
 const EXPIRES_IN_MS = 2 * 60 * 60 * 1000;
@@ -27,7 +26,6 @@ export async function POST(request: Request) {
 
   try {
     const { relay, operatorUser, relayUser } = await ensureDemoIdentities();
-    await ensureSandboxData();
 
     const expiresAt = new Date(Date.now() + EXPIRES_IN_MS);
 

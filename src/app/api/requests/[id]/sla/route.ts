@@ -1,7 +1,6 @@
 import { db } from "@/db";
 import { workOrders } from "@/db/schema";
 import { requireIdentity, writeAudit } from "@/lib/auth";
-import { ensureSandboxData } from "@/lib/sandbox";
 import { escalateOverdueSla, getSlaSnapshot } from "@/lib/sla";
 import { eq } from "drizzle-orm";
 
@@ -9,7 +8,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const auth = await requireIdentity(request);
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const [workOrder] = await db
       .select({ status: workOrders.status, executionDueAt: workOrders.executionDueAt, reviewDueAt: workOrders.reviewDueAt, slaStatus: workOrders.slaStatus })
@@ -28,7 +26,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const auth = await requireIdentity(request, { roles: ["operator", "admin"] });
   if (!auth.identity) return auth.response;
   try {
-    await ensureSandboxData();
     const { id } = await context.params;
     const result = await escalateOverdueSla(id, `operator/${auth.identity.email}`);
     if (!result.ok) return Response.json({ error: result.error }, { status: result.status });

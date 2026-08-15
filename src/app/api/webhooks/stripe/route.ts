@@ -3,7 +3,7 @@ import { payouts, stripeWebhookEvents } from "@/db/schema";
 import { recordLifecycleEvent } from "@/lib/lifecycle";
 import { recordOperationalEvent, reportException } from "@/lib/observability";
 import { stripePayloadHash, type StripeEvent, verifyStripeWebhook } from "@/lib/stripe-webhook";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 export async function POST(request: Request) {
   const payload = await request.text();
@@ -37,12 +37,17 @@ export async function POST(request: Request) {
     if (event.type === "transfer.created") {
       // Guard against an out-of-order transfer.created arriving after a
       // transfer.failed/reversed already resolved this payout: only a payout
-      // still "authorized" may be marked released.
+      // still awaiting its outcome may be marked released.
+      //
+      // "releasing" is included because the release route commits that claim
+      // before calling Stripe, so the webhook legitimately races the route's
+      // own completion. Whichever arrives first records the release; the other
+      // finds the row already "released" and ignores it.
       const released = await db.transaction(async (tx) => {
         const [row] = await tx
           .update(payouts)
-          .set({ status: "released", settlementProvider: "stripe", settlementRef: event.data.object.id || payout.settlementRef, providerEventId: event.id, reconciledAt: new Date(), failureReason: null })
-          .where(and(eq(payouts.id, payout.id), eq(payouts.status, "authorized")))
+          .set({ status: "released", settlementProvider: "stripe", settlementRef: event.data.object.id || payout.settlementRef, providerEventId: event.id, reconciledAt: new Date(), releasedAt: payout.releasedAt ?? new Date(), failureReason: null })
+          .where(and(eq(payouts.id, payout.id), inArray(payouts.status, ["authorized", "releasing"])))
           .returning();
         await tx
           .update(stripeWebhookEvents)

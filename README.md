@@ -21,10 +21,37 @@ Certifera is an operations layer for funding, matching, proving, reviewing, and 
 
 ```bash
 npm install
+npm run db:migrate       # apply schema migrations
+npm run db:seed:sandbox  # optional: demonstration relays, outcomes, and bids
 npm run dev
 ```
 
 Create the first administrator at `/access`, then open `/console`.
+
+## Database schema changes
+
+Schema is versioned in `./drizzle` and applied by an explicit migration step. Never
+run `drizzle-kit push` against a deployed database: it diffs `schema.ts` straight
+against whatever `DATABASE_URL` points at and executes the result, so a renamed
+column reaches production as `DROP` + `ADD` with no record and no rollback.
+
+```bash
+# 1. edit src/db/schema.ts, then generate the migration that carries the change
+npm run db:generate -- --name add_something
+
+# 2. review the emitted SQL in ./drizzle, then apply it
+npm run db:migrate
+```
+
+CI applies migrations and fails if `schema.ts` and `./drizzle` have drifted apart.
+
+Adopting migrations on a database that already has the schema (one time, per
+environment): confirm the schema matches, then record the baseline as applied
+rather than re-running its DDL.
+
+```bash
+npm run db:baseline -- 0000_baseline
+```
 
 ## Required environment
 
