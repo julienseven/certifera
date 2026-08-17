@@ -3,23 +3,12 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import type { Variant } from "./lattice-scene";
+import { webglReport } from "./webgl";
 
 const LatticeScene = dynamic(() => import("./lattice-scene"), { ssr: false });
 
 type NetworkInformation = { saveData?: boolean };
 type State = "on" | "save-data" | "no-webgl";
-
-function webglReport() {
-  try {
-    const probe = document.createElement("canvas");
-    const gl = (probe.getContext("webgl2") || probe.getContext("webgl")) as WebGLRenderingContext | null;
-    if (!gl) return null;
-    const info = gl.getExtension("WEBGL_debug_renderer_info");
-    return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "available";
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Defers the WebGL chunk until the browser is idle, so the three.js payload never

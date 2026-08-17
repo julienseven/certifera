@@ -1,10 +1,15 @@
 import type { CSSProperties } from "react";
 import { handoff } from "@/content/landing";
 import { Reveal } from "@/components/marketing/reveal";
+import { HandoffArtwork } from "@/components/three/handoff-artwork";
 
 type Lane = (typeof handoff.lanes)[number];
 type Node = (typeof handoff.nodes)[number];
 type Packet = Lane["packets"][number];
+type Anchor = "demand" | "ledger" | "supply" | "fee";
+
+/** Rail names the WebGL layer looks up by; the order matches `handoff.lanes`. */
+const RAILS = ["outbound", "inbound"] as const;
 
 /**
  * Places an element in the shared 16-second loop. `--at` is read by globals.css as
@@ -41,16 +46,20 @@ export function Handoff() {
         </Reveal>
       </div>
 
-      <Reveal delay={140} variant="blur" className="mt-12">
-        <div className="grid items-start gap-y-2 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.04fr)_minmax(0,0.92fr)_minmax(0,1.04fr)_minmax(0,0.92fr)]">
-          <FlowNode node={demand} />
-          <FlowLane lane={outbound} />
+      <Reveal delay={140} variant="blur" className="relative isolate mt-12">
+        {/* Measures the boxes below and runs the traffic over them in WebGL. It
+            draws behind the cards, which are opaque, so a packet entering a node
+            slides under it. */}
+        <HandoffArtwork />
+        <div className="relative z-10 grid items-start gap-y-2 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.04fr)_minmax(0,0.92fr)_minmax(0,1.04fr)_minmax(0,0.92fr)]">
+          <FlowNode node={demand} anchor="demand" />
+          <FlowLane lane={outbound} rail={RAILS[0]} />
           <div>
-            <FlowNode node={ledger} />
+            <FlowNode node={ledger} anchor="ledger" />
             <FeeDrop />
           </div>
-          <FlowLane lane={inbound} />
-          <FlowNode node={supply} accent />
+          <FlowLane lane={inbound} rail={RAILS[1]} />
+          <FlowNode node={supply} anchor="supply" accent />
         </div>
       </Reveal>
 
@@ -70,9 +79,15 @@ export function Handoff() {
   );
 }
 
-function FlowNode({ node, accent = false }: { node: Node; accent?: boolean }) {
+function FlowNode({ node, anchor, accent = false }: { node: Node; anchor: Anchor; accent?: boolean }) {
   return (
-    <article style={beat(node.at)} data-accent={accent || undefined} className="handoff-node rounded-sm border border-line bg-panel p-5">
+    <article
+      style={beat(node.at)}
+      data-accent={accent || undefined}
+      data-flow-node={anchor}
+      data-flow-at={node.at}
+      className="handoff-node rounded-sm border border-line bg-panel p-5"
+    >
       <div className="flex items-center justify-between gap-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/40">{node.role}</p>
         <span aria-hidden className="handoff-pip" />
@@ -85,10 +100,10 @@ function FlowNode({ node, accent = false }: { node: Node; accent?: boolean }) {
   );
 }
 
-function FlowLane({ lane }: { lane: Lane }) {
+function FlowLane({ lane, rail }: { lane: Lane; rail: string }) {
   return (
     <div className="px-1 lg:px-3">
-      <div className="handoff-rail" aria-hidden>
+      <div className="handoff-rail" data-flow-rail={rail} aria-hidden>
         {lane.packets.map((packet) => (
           <span
             key={packet.text}
@@ -130,14 +145,19 @@ function PacketStep({ packet }: { packet: Packet }) {
 function FeeDrop() {
   return (
     <div className="mt-4 flex items-stretch gap-4 pl-5">
-      <div className="handoff-drop" aria-hidden>
+      <div className="handoff-drop" data-flow-rail="fee" aria-hidden>
         <span className="packet-runner" data-axis="y" style={beat(handoff.fee.at, { "--from": "0%", "--to": "100%" } as CSSProperties)}>
           <span className="packet" data-kind="money">
             {handoff.fee.text}
           </span>
         </span>
       </div>
-      <div style={beat(handoff.fee.at)} className="handoff-node flex-1 self-end rounded-sm border border-line bg-panel/60 px-4 py-3">
+      <div
+        style={beat(handoff.fee.at)}
+        data-flow-node="fee"
+        data-flow-at={handoff.fee.at}
+        className="handoff-node flex-1 self-end rounded-sm border border-line bg-panel/60 px-4 py-3"
+      >
         <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/40">{handoff.fee.label}</p>
         <p className="mt-1 font-mono text-[15px] tabular-nums text-mint">
           {handoff.fee.value} <span className="text-white/32">· $9.00</span>

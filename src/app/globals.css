@@ -614,9 +614,12 @@ option {
   color: var(--mint);
 }
 
+/* On the fee branch the pill hangs to the left of the rail rather than centred on
+   it: centred, it would sit on top of the protocol-fee chip's own label. */
 .packet-runner[data-axis="y"] .packet {
   top: 0;
-  left: 50%;
+  left: 0;
+  translate: calc(-100% - 10px) -50%;
 }
 
 .packet[data-kind="money"] {
@@ -642,6 +645,34 @@ option {
 @media (min-width: 64rem) {
   .packet {
     display: block;
+  }
+}
+
+/* Once the WebGL layer is running it draws the travelling light and the glow around
+   each node, so the CSS versions of both stand down. The pills stay: DOM text is
+   sharper than anything drawn into the canvas, and both layers read the same
+   document timeline, so a comet always arrives under the label that names it. */
+.handoff[data-webgl="on"] .packet-runner::before {
+  opacity: 0;
+}
+
+.handoff[data-webgl="on"] .packet {
+  box-shadow: none;
+}
+
+.handoff[data-webgl="on"] .handoff-node {
+  animation-name: node-quiet;
+}
+
+@keyframes node-quiet {
+  0%,
+  18%,
+  100% {
+    border-color: var(--line);
+  }
+  3%,
+  13% {
+    border-color: rgba(115, 245, 154, 0.42);
   }
 }
 
