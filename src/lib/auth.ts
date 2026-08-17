@@ -66,19 +66,27 @@ export async function clearSession() {
 
 /**
  * `db.execute` bypasses drizzle's column mapping, and its driver config parses
- * timestamps back as the raw wire string rather than a Date — so the two
- * timestamp columns are typed as they actually arrive. Nothing below reads them
- * as dates; both are only tested for presence.
+ * timestamps back as the raw wire string rather than a Date — so the timestamp
+ * columns are typed as they actually arrive. The verification and MFA stamps
+ * are only tested for presence; `lockedUntil` is the one that gets parsed back
+ * to a Date before it is compared.
  */
 type UserColumns = Pick<typeof users.$inferSelect, "id" | "email" | "displayName" | "role" | "status" | "relayId"> & {
   emailVerifiedAt: string | null;
   mfaEnabledAt: string | null;
+  lockedUntil: string | null;
 };
 type IdentityRow = UserColumns & { rateCount: number };
 type ApiKeyRow = IdentityRow & { scopes: string[] };
 
 function identityFromUser(user: UserColumns, method: Identity["method"], scopes: string[] = ["*"]): Identity | null {
   if (!roles.includes(user.role as Role) || user.status !== "active") return null;
+  // A locked account is locked to every credential type, not just to the
+  // sign-in form. Only the login route consulted this, so a caller already
+  // holding a session or an API key could keep a guessing loop running against
+  // an account login had already shut — notably against DELETE /api/auth/mfa,
+  // where the prize is the second factor.
+  if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) return null;
   if (process.env.CERTIFERA_EMAIL_VERIFICATION_REQUIRED === "true" && !user.emailVerifiedAt) return null;
   return {
     userId: user.id,
@@ -94,7 +102,7 @@ function identityFromUser(user: UserColumns, method: Identity["method"], scopes:
 }
 
 /** Aliased to the camelCase `identityFromUser` reads, since these come back off a raw statement. */
-const userColumns = sql`u.id, u.email, u.display_name AS "displayName", u.role, u.status, u.relay_id AS "relayId", u.email_verified_at AS "emailVerifiedAt", u.mfa_enabled_at AS "mfaEnabledAt"`;
+const userColumns = sql`u.id, u.email, u.display_name AS "displayName", u.role, u.status, u.relay_id AS "relayId", u.email_verified_at AS "emailVerifiedAt", u.mfa_enabled_at AS "mfaEnabledAt", u.locked_until AS "lockedUntil"`;
 
 type RateLimitBump = { route: string; windowStart: Date; now: Date };
 

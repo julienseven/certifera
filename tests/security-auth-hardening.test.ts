@@ -196,6 +196,33 @@ describe("login with MFA", () => {
   });
 });
 
+describe("lockout applies to every credential, not just the sign-in form", () => {
+  it("refuses a live session belonging to a locked account", async () => {
+    const user = await makeUser();
+    await createSession(user.id);
+    const { DELETE } = await import("@/app/api/auth/mfa/route");
+
+    // The session is genuine and works right up to the moment login shuts the
+    // account. Before this, only POST /api/auth/login consulted locked_until,
+    // so an attacker already holding a session could keep guessing TOTP codes
+    // against the endpoint that removes the second factor — roughly 30 hours
+    // at the default ceiling, with no counter ever biting.
+    expect((await DELETE(new Request("http://localhost/api/auth/mfa", { method: "DELETE" }))).status).not.toBe(401);
+
+    await db.update(users).set({ lockedUntil: new Date(Date.now() + 15 * 60_000) }).where(eq(users.id, user.id));
+    expect((await DELETE(new Request("http://localhost/api/auth/mfa", { method: "DELETE" }))).status).toBe(401);
+  });
+
+  it("lets the same session back in once the lock has expired", async () => {
+    const user = await makeUser();
+    await createSession(user.id);
+    const { DELETE } = await import("@/app/api/auth/mfa/route");
+
+    await db.update(users).set({ lockedUntil: new Date(Date.now() - 60_000) }).where(eq(users.id, user.id));
+    expect((await DELETE(new Request("http://localhost/api/auth/mfa", { method: "DELETE" }))).status).not.toBe(401);
+  });
+});
+
 describe("maintenance entrypoint", () => {
   const secret = `cron-secret-${suffix}`;
 

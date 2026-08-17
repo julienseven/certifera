@@ -145,3 +145,24 @@ describe("reporting", () => {
     expect(collectEnvProblems(productionBase)).toEqual([]);
   });
 });
+
+/**
+ * The bricked deployment: every upload commits at scan_status "pending", and
+ * nothing in the repository moves a row off it, so proof submission is refused
+ * for every outcome with only a warning-level event to say why.
+ */
+describe("scan gating", () => {
+  it("refuses required scanning with no scanner to answer it", () => {
+    expect(problemsFor({ CERTIFERA_EVIDENCE_SCAN_REQUIRED: "true" })).toContain("CERTIFERA_MALWARE_SCAN_WEBHOOK");
+  });
+
+  it("accepts required scanning once a scanner is configured", () => {
+    expect(
+      problemsFor({ CERTIFERA_EVIDENCE_SCAN_REQUIRED: "true", CERTIFERA_MALWARE_SCAN_WEBHOOK: "https://scanner.example/scan" }),
+    ).toEqual([]);
+  });
+
+  it("leaves a deployment that has not enabled gating alone", () => {
+    expect(problemsFor({ CERTIFERA_EVIDENCE_SCAN_REQUIRED: undefined })).toEqual([]);
+  });
+});
