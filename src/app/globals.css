@@ -443,6 +443,331 @@ option {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Handoff diagram: one 16s settlement loop shared by every moving part. Each
+   element is placed in the loop by a negative delay of its own `--at` second —
+   the lifecycle strip's trick — so the whole thing stays in step with no timer,
+   no client component, and no re-render. Nothing here animates anything but
+   opacity, transform and colour.
+   --------------------------------------------------------------------------- */
+.handoff {
+  --loop: 16s;
+}
+
+.handoff-node {
+  transition: border-color 480ms ease, box-shadow 480ms ease;
+}
+
+.handoff-pip {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background-color 480ms ease, box-shadow 480ms ease;
+}
+
+/* The rails. A hairline with a terminal at each end, so it reads as a connection
+   rather than a stray rule; the packets ride on top of it. */
+.handoff-rail,
+.handoff-drop {
+  position: relative;
+  background: var(--line);
+}
+
+/* Stacked, the rail is a divider between two cards; in the desktop row it has to
+   meet them at roughly their own mid-height. */
+.handoff-rail {
+  height: 1px;
+  width: 100%;
+  margin-top: 1.75rem;
+}
+
+@media (min-width: 64rem) {
+  .handoff-rail {
+    margin-top: 5.75rem;
+  }
+}
+
+.handoff-drop {
+  width: 1px;
+  min-height: 3.5rem;
+  margin-left: 0.5rem;
+}
+
+.handoff-rail::before,
+.handoff-rail::after,
+.handoff-drop::before,
+.handoff-drop::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  margin: -2px 0 0 -2px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.handoff-rail::before {
+  top: 50%;
+  left: 0;
+}
+
+.handoff-rail::after {
+  top: 50%;
+  left: 100%;
+}
+
+.handoff-drop::before {
+  top: 0;
+  left: 50%;
+}
+
+.handoff-drop::after {
+  top: 100%;
+  left: 50%;
+}
+
+/* A runner spans its whole rail, so translating it by 100% of itself carries the
+   packet exactly end to end at any width — no measured pixels, no JS. */
+.packet-runner {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+/* The travelling light. It is the whole animation below `lg`, where a pill wide
+   enough to read does not fit the rail. */
+.packet-runner::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 34px;
+  height: 1px;
+  translate: -50% -50%;
+  background: linear-gradient(90deg, transparent, var(--mint), transparent);
+  box-shadow: 0 0 12px rgba(115, 245, 154, 0.55);
+}
+
+.packet-runner[data-axis="y"]::before {
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(180deg, transparent, var(--mint), transparent);
+}
+
+.packet {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: none;
+  translate: -50% -50%;
+  white-space: nowrap;
+  border: 1px solid rgba(115, 245, 154, 0.35);
+  border-radius: 9999px;
+  /* Opaque: the packet crosses the rail it rides on. */
+  background: var(--panel-raised);
+  box-shadow: 0 0 30px -10px rgba(115, 245, 154, 0.9);
+  padding: 0.3rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--mint);
+}
+
+.packet-runner[data-axis="y"] .packet {
+  top: 0;
+  left: 50%;
+}
+
+.packet[data-kind="money"] {
+  border-color: var(--mint);
+  background: var(--mint);
+  color: #071b0e;
+  font-weight: 600;
+}
+
+.handoff-arrow {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.handoff-step-label {
+  color: rgba(244, 247, 242, 0.72);
+}
+
+.handoff-event {
+  color: rgba(244, 247, 242, 0.3);
+  transition: color 400ms ease, border-color 400ms ease;
+}
+
+@media (min-width: 64rem) {
+  .packet {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .packet-runner {
+    animation: packet-travel var(--loop) linear infinite;
+    animation-delay: calc(var(--at) * 1s - var(--loop));
+  }
+
+  .handoff-node,
+  .handoff-pip,
+  .handoff-arrow,
+  .handoff-step-label,
+  .handoff-event {
+    animation-duration: var(--loop);
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-delay: calc(var(--at) * 1s - var(--loop));
+  }
+
+  .handoff-node {
+    animation-name: node-live;
+  }
+
+  .handoff-pip {
+    animation-name: pip-live;
+  }
+
+  .handoff-arrow {
+    animation-name: arrow-fire;
+  }
+
+  .handoff-step-label {
+    animation-name: label-fire;
+  }
+
+  .handoff-event {
+    animation-name: event-write;
+  }
+}
+
+@keyframes packet-travel {
+  0% {
+    opacity: 0;
+    transform: translateX(var(--from, 0%));
+  }
+  4% {
+    opacity: 1;
+  }
+  8.5% {
+    opacity: 1;
+  }
+  12% {
+    opacity: 0;
+    transform: translateX(var(--to, 100%));
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(var(--to, 100%));
+  }
+}
+
+/* Same window, vertical: the 5% branch drops instead of crossing. */
+@keyframes packet-travel-y {
+  0% {
+    opacity: 0;
+    transform: translateY(var(--from, 0%));
+  }
+  4% {
+    opacity: 1;
+  }
+  8.5% {
+    opacity: 1;
+  }
+  12% {
+    opacity: 0;
+    transform: translateY(var(--to, 100%));
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(var(--to, 100%));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .packet-runner[data-axis="y"] {
+    animation-name: packet-travel-y;
+  }
+}
+
+@keyframes node-live {
+  0%,
+  18%,
+  100% {
+    border-color: var(--line);
+    box-shadow: none;
+  }
+  3%,
+  13% {
+    border-color: rgba(115, 245, 154, 0.42);
+    box-shadow: 0 0 46px -20px rgba(115, 245, 154, 0.95);
+  }
+}
+
+@keyframes pip-live {
+  0%,
+  18%,
+  100% {
+    background: rgba(255, 255, 255, 0.16);
+    box-shadow: none;
+  }
+  3%,
+  13% {
+    background: var(--mint);
+    box-shadow: 0 0 14px 2px rgba(115, 245, 154, 0.5);
+  }
+}
+
+@keyframes arrow-fire {
+  0%,
+  14%,
+  100% {
+    color: rgba(255, 255, 255, 0.25);
+    transform: translateX(0);
+  }
+  4%,
+  10% {
+    color: var(--mint);
+    transform: translateX(2px);
+  }
+}
+
+@keyframes label-fire {
+  0%,
+  14%,
+  100% {
+    color: rgba(244, 247, 242, 0.72);
+  }
+  4%,
+  10% {
+    color: var(--mint);
+  }
+}
+
+/* Written bright, then left as recent-but-settled, the way an append-only row
+   stops being the newest one. */
+@keyframes event-write {
+  0%,
+  100% {
+    color: rgba(244, 247, 242, 0.3);
+    border-color: var(--line);
+  }
+  2%,
+  9% {
+    color: var(--mint);
+    border-color: rgba(115, 245, 154, 0.42);
+  }
+  24% {
+    color: rgba(244, 247, 242, 0.55);
+    border-color: var(--line);
+  }
+}
+
 /* A one-pass sheen across the hero's mint line, on load only. Guarded: without
    background-clip support the fill must stay opaque or the headline disappears. */
 @supports ((background-clip: text) or (-webkit-background-clip: text)) {

@@ -138,6 +138,79 @@ export const economics = {
   ] as const,
 } as const;
 
+/**
+ * The handoff diagram. `at` is the second of a shared 16-second loop at which each
+ * part fires; the CSS turns it into a negative animation delay, so the copy and the
+ * choreography live in one place and nothing needs a timer to stay in step.
+ *
+ * The figures are one worked outcome, and they have to keep faith with the rest of
+ * the page: a $180 quote, the flat 5% fee ($9.00), the relay's net ($171.00), and
+ * an execution deadline of the quoted 90-minute ETA plus max(15 min, 20%) = 01:48.
+ */
+export const handoff = {
+  eyebrow: "The handoff",
+  heading: "Work goes out. Proof comes back. Money moves once.",
+  standfirst:
+    "One outcome, end to end. A builder funds it, a relay quotes and executes it, evidence clears a six-hour review, and a single payout splits 95 / 5. Every step below is a row in execution_events.",
+  nodes: [
+    {
+      at: 0,
+      role: "Demand",
+      name: "Agent builder",
+      meta: "cfr_… · requests:write",
+      figure: "$180.00",
+      figureLabel: "committed the moment the request is posted.",
+    },
+    {
+      at: 4,
+      role: "Ledger",
+      name: "Certifera",
+      meta: "execution_events · append-only",
+      figure: "held",
+      figureLabel: "matched, clocked, and released only against reviewed proof.",
+    },
+    {
+      at: 12,
+      role: "Supply",
+      name: "Field relay",
+      meta: "Austin, TX · coverage approved",
+      figure: "+$171.00",
+      figureLabel: "95% of its own quote, paid exactly once.",
+    },
+  ],
+  lanes: [
+    {
+      caption: "builder ⇄ market",
+      packets: [
+        { at: 0, dir: "right", kind: "work", text: "request · $180.00", note: "POST /api/requests — funded into the open market." },
+        { at: 8, dir: "left", kind: "work", text: "proof · score 85", note: "Proof bundle: SHA-256 digest, capture score, named gaps." },
+        { at: 10, dir: "right", kind: "work", text: "approved", note: "PATCH review inside the six-hour window. Payout authorized." },
+      ],
+    },
+    {
+      caption: "market ⇄ relay",
+      packets: [
+        { at: 2, dir: "left", kind: "work", text: "bid $180 · eta 90m", note: "The relay sets its own price and a committed ETA." },
+        { at: 4, dir: "right", kind: "work", text: "matched · 01:48", note: "Selection starts the execution clock: ETA + max(15 min, 20%)." },
+        { at: 6, dir: "left", kind: "work", text: "evidence · 4b7e91…", note: "Private upload, signature-checked and hashed on arrival." },
+        { at: 12, dir: "right", kind: "money", text: "transfer $171.00", note: "Settlement adapter releases the authorized payout." },
+      ],
+    },
+  ],
+  fee: { at: 12.2, text: "fee $9.00", label: "Protocol fee", value: "5%" },
+  events: [
+    { at: 0.4, name: "request.created" },
+    { at: 2.4, name: "bid.submitted" },
+    { at: 4.4, name: "request.matched" },
+    { at: 6.4, name: "proof.submitted" },
+    { at: 10.4, name: "review.approved" },
+    { at: 12.0, name: "payout.authorized" },
+    { at: 13.6, name: "payout.released" },
+  ],
+  footnote:
+    "Release is guarded by a database compare-and-set, a unique index, and a provider idempotency key. The loop above can run a thousand times and the outcome still pays once.",
+} as const;
+
 export const status = {
   eyebrow: "Honest status",
   heading: "Where this actually is.",

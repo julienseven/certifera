@@ -20,4 +20,4 @@ export const landingLinks: readonly NavLink[] = [
 ];
 
 /** Anchors MotionRoot scroll-spies. Order is the reading order; route links never highlight. */
-export const spySections = ["top", "mechanism", "proof", "api", "economics", "status", "access"] as const;
+export const spySections = ["top", "mechanism", "proof", "api", "economics", "handoff", "status", "access"] as const;

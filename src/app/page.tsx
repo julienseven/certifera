@@ -5,6 +5,7 @@ import { Access } from "@/components/landing/sections/access";
 import { ApiSurface } from "@/components/landing/sections/api";
 import { Audiences } from "@/components/landing/sections/audiences";
 import { Economics } from "@/components/landing/sections/economics";
+import { Handoff } from "@/components/landing/sections/handoff";
 import { Hero } from "@/components/landing/sections/hero";
 import { Lifecycle } from "@/components/landing/sections/lifecycle";
 import { Mechanism } from "@/components/landing/sections/mechanism";
@@ -77,6 +78,7 @@ export default function HomePage() {
         <Proof />
         <ApiSurface />
         <Economics />
+        <Handoff />
         <Status />
         <Audiences />
         <Access />
