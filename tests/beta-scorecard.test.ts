@@ -1,26 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/db";
-import { apiKeys, operationalEvents, partnerCheckins, pilotPartners, proofBundles, relayBids, relays, users, workOrders } from "@/db/schema";
+import { apiKeys, executionEvents, operationalEvents, partnerCheckins, pilotPartners, proofBundles, relayBids, relays, users, workOrders } from "@/db/schema";
 import { createApiToken } from "@/lib/auth";
 import { GET as getScorecard } from "@/app/api/admin/beta-scorecard/route";
 import { desc, eq, inArray, isNull, and, count } from "drizzle-orm";
 
 /**
- * Pins the scorecard's SQL rewrite against the per-row reduction it replaced.
+ * Pins the scorecard's aggregate query against an independent per-row
+ * reduction of the same definitions.
  *
- * The route now computes every metric in one aggregate query over the full
- * tables, where it used to pull four LIMIT 5000 slices and reduce them in JS.
- * The reference implementation below is that original reduction, run over
- * every row rather than a slice, so any divergence between what Postgres
- * computes and what the route used to report shows up as a failed equality —
- * including the cases the SQL has to get right on its own: the latest proof per
- * outcome, the first bid per outcome, an even-length median, and outcomes with
- * no proof or no bid at all.
+ * The route computes every metric in one aggregate query over the full tables,
+ * where it used to pull four LIMIT 5000 slices and reduce them in JS. The
+ * reference implementation below reduces every row by hand, so any divergence
+ * between what Postgres computes and what the definitions say shows up as a
+ * failed equality — including the cases the SQL has to get right on its own:
+ * the latest proof per outcome, the first bid per outcome, an even-length
+ * median, and outcomes with no proof or no bid at all.
  *
- * Seeded rows deliberately include a re-submitted proof (two bundles on one
- * outcome, only the newest counting), an outcome reviewed after its due date,
- * an outcome with a single bid, and a partner with two tasks.
+ * Three of those definitions read the execution ledger rather than the
+ * work_orders row, because the transitions that follow a match and a review
+ * overwrite the columns that recorded them. Seeded rows therefore include an
+ * outcome whose relay abandoned it (matched in the ledger, back to 'open' in
+ * the table), a re-submitted proof whose first review round breached the SLA
+ * and whose second did not, an outcome reviewed after its due date, an outcome
+ * with a single bid, and a partner with two tasks inside their first 30 days.
  */
 
 const suffix = randomUUID().slice(0, 8);
@@ -39,12 +43,16 @@ function withAuth() {
   return { headers: { authorization: `Bearer ${operatorToken}` } };
 }
 
-/** The pre-rewrite JS reduction, over every row instead of a 5000-row slice. */
+const REPEAT_WINDOW_MS = 30 * 24 * 60 * 60_000;
+const REVIEW_BREACH_TYPES = new Set(["review_sla_breached", "review_sla_escalated"]);
+
+/** A per-row reduction of the same definitions, over every row in the tables. */
 async function referenceMetrics() {
-  const [orders, bids, proofs, checkins, critical] = await Promise.all([
-    db.select({ id: workOrders.id, status: workOrders.status, createdAt: workOrders.createdAt, pilotPartnerId: workOrders.pilotPartnerId, reviewDueAt: workOrders.reviewDueAt }).from(workOrders).orderBy(desc(workOrders.createdAt)),
+  const [orders, bids, proofs, events, checkins, critical] = await Promise.all([
+    db.select({ id: workOrders.id, status: workOrders.status, createdAt: workOrders.createdAt, pilotPartnerId: workOrders.pilotPartnerId }).from(workOrders).orderBy(desc(workOrders.createdAt)),
     db.select({ workOrderId: relayBids.workOrderId, createdAt: relayBids.createdAt }).from(relayBids).orderBy(desc(relayBids.createdAt)),
     db.select({ workOrderId: proofBundles.workOrderId, status: proofBundles.status, createdAt: proofBundles.createdAt, reviewedAt: proofBundles.reviewedAt }).from(proofBundles).orderBy(desc(proofBundles.createdAt)),
+    db.select({ workOrderId: executionEvents.workOrderId, type: executionEvents.type, createdAt: executionEvents.createdAt }).from(executionEvents),
     db.select({ satisfaction: partnerCheckins.satisfaction }).from(partnerCheckins),
     db.select({ total: count() }).from(operationalEvents).where(and(eq(operationalEvents.level, "critical"), isNull(operationalEvents.resolvedAt))),
   ]);
@@ -56,31 +64,35 @@ async function referenceMetrics() {
     const existing = proofsByOrder.get(proof.workOrderId);
     if (!existing || proof.createdAt > existing.createdAt) proofsByOrder.set(proof.workOrderId, proof);
   }
-  const ordersById = new Map(orders.map((order) => [order.id, order]));
+  const everMatched = new Set(events.filter((event) => event.type === "relay_matched").map((event) => event.workOrderId));
   const matchedStatuses = new Set(["matched", "review", "disputed", "verified"]);
   const firstBidMinutes = orders.flatMap((order) => {
     const first = bidsByOrder.get(order.id)?.sort((a, b) => a.getTime() - b.getTime())[0];
     return first ? [Math.max(0, Math.round((first.getTime() - order.createdAt.getTime()) / 60_000))] : [];
   });
   const resolvedProofs = [...proofsByOrder.entries()].filter(([, proof]) => proof.status === "verified" || proof.status === "disputed");
-  const reviewOnTime = resolvedProofs.filter(([orderId, proof]) => {
-    const order = ordersById.get(orderId);
-    return Boolean(proof.reviewedAt && order?.reviewDueAt && proof.reviewedAt <= order.reviewDueAt);
+  const reviewOnTime = resolvedProofs.filter(([orderId, proof]) =>
+    !events.some((event) => event.workOrderId === orderId && REVIEW_BREACH_TYPES.has(event.type) && event.createdAt >= proof.createdAt));
+  const orderDatesByPartner = new Map<string, Date[]>();
+  for (const order of orders) if (order.pilotPartnerId) orderDatesByPartner.set(order.pilotPartnerId, [...(orderDatesByPartner.get(order.pilotPartnerId) || []), order.createdAt]);
+  // Only partners whose first 30 days have elapsed can answer the question.
+  const maturedWindowCounts = [...orderDatesByPartner.values()].flatMap((dates) => {
+    const firstAt = Math.min(...dates.map((date) => date.getTime()));
+    if (Date.now() - firstAt < REPEAT_WINDOW_MS) return [];
+    return [dates.filter((date) => date.getTime() - firstAt <= REPEAT_WINDOW_MS).length];
   });
-  const partnersWithTaskCounts = new Map<string, number>();
-  for (const order of orders) if (order.pilotPartnerId) partnersWithTaskCounts.set(order.pilotPartnerId, (partnersWithTaskCounts.get(order.pilotPartnerId) || 0) + 1);
   const satisfactionValues = checkins.map((checkin) => checkin.satisfaction).filter((value): value is number => typeof value === "number");
   const sorted = [...firstBidMinutes].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return {
     totalTasks: orders.length,
-    matchedTasks: orders.filter((order) => matchedStatuses.has(order.status)).length,
+    matchedTasks: orders.filter((order) => everMatched.has(order.id) || matchedStatuses.has(order.status)).length,
     proofSubmittedTasks: proofsByOrder.size,
     resolvedReviewTasks: resolvedProofs.length,
     reviewsWithinSla: reviewOnTime.length,
     competitiveBidTasks: [...bidsByOrder.values()].filter((items) => items.length >= 2).length,
-    partnerCountWithTasks: partnersWithTaskCounts.size,
-    repeatPartners: [...partnersWithTaskCounts.values()].filter((total) => total >= 2).length,
+    partnerCountWithTasks: maturedWindowCounts.length,
+    repeatPartners: maturedWindowCounts.filter((total) => total >= 2).length,
     feedbackCount: satisfactionValues.length,
     averageSatisfaction: satisfactionValues.length ? satisfactionValues.reduce((sum, value) => sum + value, 0) / satisfactionValues.length : null,
     medianFirstBidMinutes: sorted.length === 0 ? null : sorted.length % 2 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2),
@@ -94,7 +106,9 @@ async function scorecard() {
   return (await response.json()) as { metrics: Record<string, number | null>; sampled: boolean };
 }
 
-const base = new Date("2031-03-01T00:00:00.000Z");
+// Ninety days back, so the seeded partner's 30-day repeat window has closed and
+// the retention metric has an answer rather than an unelapsed cohort.
+const base = new Date(Date.now() - 90 * 24 * 60 * 60_000);
 function at(minutes: number) {
   return new Date(base.getTime() + minutes * 60_000);
 }
@@ -121,12 +135,16 @@ beforeAll(async () => {
     .returning();
   partnerId = partner.id;
 
-  // Four outcomes: two for the repeat partner, one unpartnered, one with no bid
-  // and no proof so the left joins have to survive a null on both sides.
+  // Five outcomes: two for the repeat partner, one abandoned back to the market
+  // after a match, one unpartnered, and one with no bid and no proof so the left
+  // joins have to survive a null on both sides. review_due_at is left set on the
+  // resolved ones exactly as no production row ever has it — the review route
+  // clears it — so a metric that still reads it back cannot pass here either.
   const orderSpecs = [
     { key: "resubmitted", status: "verified", partner: true, reviewDueAt: at(600) },
     { key: "late-review", status: "disputed", partner: true, reviewDueAt: at(10) },
     { key: "single-bid", status: "matched", partner: false, reviewDueAt: at(600) },
+    { key: "abandoned", status: "open", partner: false, reviewDueAt: null as Date | null },
     { key: "untouched", status: "open", partner: false, reviewDueAt: null as Date | null },
   ];
   const orders = await db
@@ -167,6 +185,19 @@ beforeAll(async () => {
     { workOrderId: byKey("single-bid"), relayId, observation: "Awaiting review", attestationHash: `hash-${suffix}-4`, verificationScore: 80, status: "pending_review", createdAt: at(160) },
   ]);
 
+  // The ledger the metrics read: which outcomes were ever matched, and which
+  // review rounds breached. The resubmitted outcome's breach belongs to its
+  // first round and predates its second bundle, so it must not follow the
+  // outcome onto the bundle that replaced it.
+  await db.insert(executionEvents).values([
+    { workOrderId: byKey("resubmitted"), type: "relay_matched", actor: "operator/console", summary: "Selected a relay.", createdAt: at(20) },
+    { workOrderId: byKey("resubmitted"), type: "review_sla_breached", actor: "liveness/engine", summary: "First round decided late.", createdAt: at(120) },
+    { workOrderId: byKey("late-review"), type: "relay_matched", actor: "operator/console", summary: "Selected a relay.", createdAt: at(20) },
+    { workOrderId: byKey("late-review"), type: "review_sla_breached", actor: "liveness/engine", summary: "Decided after the review window.", createdAt: at(400) },
+    { workOrderId: byKey("single-bid"), type: "relay_matched", actor: "operator/console", summary: "Selected a relay.", createdAt: at(80) },
+    { workOrderId: byKey("abandoned"), type: "relay_matched", actor: "operator/console", summary: "Selected a relay.", createdAt: at(40) },
+  ]);
+
   await db.insert(partnerCheckins).values([
     { partnerId, ownerUserId: operatorUserId, satisfaction: 5, feedback: "Strong", riskLevel: "low" },
     { partnerId, ownerUserId: operatorUserId, satisfaction: 3, feedback: "Mixed", riskLevel: "medium" },
@@ -177,6 +208,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(partnerCheckins).where(eq(partnerCheckins.partnerId, partnerId));
   if (seededOrderIds.length) {
+    await db.delete(executionEvents).where(inArray(executionEvents.workOrderId, seededOrderIds));
     await db.delete(proofBundles).where(inArray(proofBundles.workOrderId, seededOrderIds));
     await db.delete(relayBids).where(inArray(relayBids.workOrderId, seededOrderIds));
     await db.delete(workOrders).where(inArray(workOrders.id, seededOrderIds));

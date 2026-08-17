@@ -32,4 +32,30 @@ describe("closed beta launch gates", () => {
     const gates = evaluateLaunchGates({ ...strongMetrics, unresolvedCriticalAlerts: 1 }, true);
     expect(gates.find((gate) => gate.key === "critical_alerts")?.status).toBe("fail");
   });
+
+  it("reports an empty pilot as unmeasured rather than as a rate", () => {
+    // Every rate here divides by a count that a pilot with no tasks has none
+    // of. The answer a launch decision can survive is "not measured yet" — not
+    // a 0% that reads as a failure, a 100% that reads as a pass, or a NaN.
+    const empty: BetaMetrics = {
+      totalTasks: 0,
+      matchedTasks: 0,
+      proofSubmittedTasks: 0,
+      resolvedReviewTasks: 0,
+      reviewsWithinSla: 0,
+      competitiveBidTasks: 0,
+      partnerCountWithTasks: 0,
+      repeatPartners: 0,
+      feedbackCount: 0,
+      averageSatisfaction: null,
+      medianFirstBidMinutes: null,
+      unresolvedCriticalAlerts: 0,
+    };
+    const rateGates = evaluateLaunchGates(empty, true).filter((gate) => ["proof_completion", "review_sla", "competitive_bids", "repeat_demand"].includes(gate.key));
+    expect(rateGates).toHaveLength(4);
+    for (const gate of rateGates) {
+      expect(gate.status).toBe("insufficient");
+      expect(gate.current).toBe("—");
+    }
+  });
 });

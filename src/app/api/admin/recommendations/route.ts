@@ -1,21 +1,19 @@
 import { db } from "@/db";
 import { evidenceAssets, payouts } from "@/db/schema";
 import { requireIdentity } from "@/lib/auth";
+import { getBetaMetrics } from "@/lib/beta";
 import { getProductionReadiness } from "@/lib/readiness";
 import { and, count, eq, lt } from "drizzle-orm";
 
 export async function GET(request: Request) {
   const auth = await requireIdentity(request, { roles: ["admin", "operator"] });
   if (!auth.identity) return auth.response;
-  const scoreResponse = await fetch(new URL("/api/admin/beta-scorecard", request.url), { headers: { cookie: request.headers.get("cookie") || "" } });
-  if (!scoreResponse.ok) return Response.json({ error: "Could not calculate beta recommendations." }, { status: 500 });
-  const scorecard = (await scoreResponse.json()) as { metrics: { totalTasks: number; matchedTasks: number; proofSubmittedTasks: number; resolvedReviewTasks: number; reviewsWithinSla: number; competitiveBidTasks: number; partnerCountWithTasks: number; repeatPartners: number; feedbackCount: number; averageSatisfaction: number | null; unresolvedCriticalAlerts: number } };
-  const [lowSignal, failedPayouts, readiness] = await Promise.all([
+  const [metrics, lowSignal, failedPayouts, readiness] = await Promise.all([
+    getBetaMetrics(),
     db.select({ total: count() }).from(evidenceAssets).where(and(eq(evidenceAssets.scanStatus, "validated"), lt(evidenceAssets.intelligenceScore, 70))),
     db.select({ total: count() }).from(payouts).where(eq(payouts.status, "failed")),
     getProductionReadiness(),
   ]);
-  const metrics = scorecard.metrics;
   const recommendations: { priority: "now" | "next" | "later"; title: string; rationale: string; action: string }[] = [];
   if (!readiness.ready) recommendations.push({ priority: "now", title: "Finish deployment readiness", rationale: "Operational safeguards are incomplete, which blocks a trustworthy cohort launch.", action: "Resolve blocked checks in Pilot Command before increasing task volume." });
   if (metrics.unresolvedCriticalAlerts > 0) recommendations.push({ priority: "now", title: "Resolve critical operations alerts", rationale: `${metrics.unresolvedCriticalAlerts} critical alert(s) remain unresolved.`, action: "Use Operations Center to investigate, reconcile, and resolve before new paid work." });
