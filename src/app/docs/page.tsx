@@ -1,45 +1,94 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { DemoKeyButton } from "./demo-key-button";
+import { DocsSidebar } from "@/components/docs/sidebar";
+import { ProseBlock } from "@/components/docs/prose";
+import { SiteFooter } from "@/components/marketing/chrome";
+import { Icon } from "@/components/marketing/icon";
+import { MotionRoot } from "@/components/marketing/motion";
+import { SiteHeader } from "@/components/marketing/site-header";
+import { docGroups, docSectionIds, docSections, docsMeta } from "@/content/docs";
+import { siteLinks } from "@/content/nav";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = pageMetadata({
   title: "API documentation — outcomes, evidence, and settlement",
   description:
-    "Developer and operator documentation for Certifera: the outcome lifecycle, scoped cfr_ API key authentication, private evidence upload, proof bundles, and the settlement release path.",
+    "Developer and operator documentation for Certifera: the outcome lifecycle, scoped cfr_ API key authentication, private evidence upload, proof bundles, rate limits, and the settlement release path.",
   path: "/docs",
   keywords: ["Certifera API", "outcome lifecycle API", "evidence upload API", "proof bundle", "agent API keys", "REST verification API"],
 });
 
-const sections = [
-  ["01", "Outcome lifecycle", "A request moves through open, matched, review, verified, disputed, and reopened. Every mutation writes an append-only lifecycle event."],
-  ["02", "Authentication", "Browser operators use secure HTTP-only sessions. Agent integrations use scoped cfr_ API keys. Every privileged route enforces a role server-side."],
-  ["03", "Private evidence", "Relays upload a JPG, PNG, WEBP, or PDF directly to Certifera. Files are size-limited, signature-checked, SHA-256 hashed, private, and access-controlled."],
-  ["04", "Settlement", "Review approval creates a payout instruction. A protected release action supports sandbox mode today and Stripe Connect transfers when production credentials are configured."],
-] as const;
-
-const endpoints = [
-  ["POST", "/api/requests", "Create an outcome request", "requests:write"],
-  ["GET", "/api/requests", "Read the authenticated request market", "requests:read"],
-  ["POST", "/api/requests/:id/bids", "Place or revise a relay quote", "requests:write"],
-  ["POST", "/api/evidence", "Upload a private proof asset", "proofs:write"],
-  ["POST", "/api/requests/:id/proof", "Submit a proof bundle", "proofs:write"],
-  ["PATCH", "/api/requests/:id/review", "Approve, dispute, or reopen", "operator/reviewer"],
-  ["PATCH", "/api/requests/:id/settlement", "Release an approved payout", "operator/admin"],
-] as const;
-
-function Glyph({ name, size = 17 }: { name: "arrow" | "check" | "code" | "shield" | "book"; size?: number }) {
-  const base = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  if (name === "arrow") return <svg {...base}><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
-  if (name === "check") return <svg {...base}><path d="m5 12 4.2 4.2L19 6.5" /></svg>;
-  if (name === "code") return <svg {...base}><path d="m9 18-6-6 6-6M15 6l6 6-6 6" /></svg>;
-  if (name === "shield") return <svg {...base}><path d="M12 3 5.5 6v5c0 4.4 2.7 8.2 6.5 10 3.8-1.8 6.5-5.6 6.5-10V6L12 3Z" /><path d="m9.5 12 1.6 1.6 3.8-4" /></svg>;
-  return <svg {...base}><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3V4Z" /><path d="M8 8h7M8 12h7" /></svg>;
-}
-
 export default function DocsPage() {
-  return <main className="console-surface min-h-screen bg-[#060806] text-[#f4f7f2] selection:bg-[#73f59a] selection:text-[#071b0e]"><header className="sticky top-0 z-30 border-b border-white/10 bg-[#060806]/90 backdrop-blur-xl"><div className="mx-auto flex h-[68px] max-w-[1440px] items-center justify-between px-5 sm:px-8"><Link href="/" className="group flex items-center gap-3" aria-label="Certifera home"><span className="grid h-7 w-7 place-items-center rounded-full bg-[#73f59a] text-[#071b0e] transition-transform group-hover:rotate-45"><span className="h-2.5 w-2.5 rotate-45 border-2 border-current" /></span><span className="text-[18px] font-medium tracking-[-0.05em]">certifera<span className="text-[#73f59a]">/</span></span></Link><div className="flex items-center gap-3"><a href="https://github.com/julienseven/certifera" target="_blank" rel="noreferrer" className="hidden text-[10px] font-bold uppercase tracking-[0.13em] text-white/48 hover:text-[#a8ffbe] sm:block">GitHub ↗</a><Link href="/access?next=/console" className="inline-flex items-center gap-2 rounded-full border border-[#73f59a]/35 bg-[#73f59a]/10 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.13em] text-[#a8ffbe] transition-colors hover:bg-[#73f59a] hover:text-[#071b0e]">Operator access <Glyph name="arrow" size={14} /></Link></div></div></header><div className="mx-auto max-w-[1440px] px-5 py-10 sm:px-8 sm:py-14 lg:px-11"><section className="grid gap-8 border-b border-white/10 pb-12 lg:grid-cols-[1.15fr_.85fr] lg:items-end"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#73f59a]">Certifera documentation</p><h1 className="mt-4 max-w-4xl text-[clamp(3.2rem,6vw,6.6rem)] font-medium leading-[0.85] tracking-[-0.085em]">Verified execution, documented<span className="text-[#73f59a]">.</span></h1><p className="mt-7 max-w-xl text-[16px] leading-relaxed text-white/58">Certifera turns a physical-world request into a funded, attributable, reviewable, and settlement-ready outcome. This guide covers the beta operating surface.</p></div><div className="rounded-2xl border border-[#73f59a]/20 bg-[#73f59a]/[0.05] p-5"><div className="flex items-center gap-3 text-[#a8ffbe]"><Glyph name="shield" size={18} /><p className="text-[10px] font-semibold uppercase tracking-[0.15em]">Beta safety model</p></div><p className="mt-4 text-[13px] leading-relaxed text-white/67">The console is private by default. All actors authenticate, every proof asset is access-controlled, and all lifecycle changes create a durable audit record.</p><a href="/launch" className="mt-5 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.13em] text-[#a8ffbe] hover:text-white">Read launch readiness <Glyph name="arrow" size={14} /></a></div></section><section className="mt-12"><div className="flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-lg border border-[#73f59a]/20 bg-[#73f59a]/[0.06] text-[#a8ffbe]"><Glyph name="book" size={16} /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#73f59a]">Core concepts</p><h2 className="mt-1 text-2xl font-medium tracking-[-0.05em]">The operating contract</h2></div></div><div className="mt-5 grid gap-3 md:grid-cols-2">{sections.map(([number, title, copy]) => <article key={number} className="glass-panel rounded-2xl border border-white/10 p-5"><span className="font-mono text-[11px] text-[#73f59a]">{number}</span><h3 className="mt-7 text-xl font-medium tracking-[-0.045em]">{title}</h3><p className="mt-3 text-[12px] leading-relaxed text-white/53">{copy}</p></article>)}</div></section><section className="mt-14 grid gap-8 border-t border-white/10 pt-12 lg:grid-cols-[.72fr_1.28fr]"><div><p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-[#73f59a]">API quick start</p><h2 className="mt-3 text-[clamp(2.3rem,4vw,4.4rem)] font-medium leading-[0.9] tracking-[-0.075em]">Build against the lifecycle.</h2><p className="mt-6 max-w-sm text-[13px] leading-relaxed text-white/50">Create an API key from the private operator console. Store it server-side, then send it as a Bearer token. Never expose it in browser code.</p><pre className="mt-7 overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-4 text-[11px] leading-relaxed text-[#a8ffbe]"><code>{`curl -X POST https://your-domain/api/requests \\
-  -H "Authorization: Bearer cfr_…" \\
-  -H "Content-Type: application/json" \\
-  -d '{"title":"Verify asset condition", ...}'`}</code></pre><DemoKeyButton /></div><div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0b100c]/80"><div className="grid grid-cols-[68px_1fr] border-b border-white/10 px-5 py-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/38 sm:grid-cols-[82px_1fr_135px]"><span>Method</span><span>Endpoint</span><span className="hidden sm:block">Authority</span></div>{endpoints.map(([method, endpoint, description, authority]) => <div key={`${method}-${endpoint}`} className="grid grid-cols-[68px_1fr] gap-3 border-b border-white/10 px-5 py-4 last:border-0 sm:grid-cols-[82px_1fr_135px]"><span className="font-mono text-[10px] text-[#a8ffbe]">{method}</span><div><p className="font-mono text-[11px] text-white/83">{endpoint}</p><p className="mt-1 text-[11px] leading-relaxed text-white/43">{description}</p></div><span className="col-start-2 text-[10px] uppercase tracking-[0.1em] text-white/36 sm:col-start-auto sm:self-center">{authority}</span></div>)}</div></section><section className="mt-14 rounded-2xl border border-[#73f59a]/25 bg-[#73f59a] p-6 text-[#071b0e] sm:p-9"><div className="grid gap-8 lg:grid-cols-[1fr_.85fr] lg:items-end"><div><p className="text-[10px] font-bold uppercase tracking-[0.17em] text-[#071b0e]/60">Keep building in public</p><h2 className="mt-4 text-[clamp(2.4rem,5vw,5.2rem)] font-medium leading-[0.86] tracking-[-0.08em]">Docs are a contract with operators and developers.</h2></div><div><p className="text-[13px] leading-relaxed text-[#071b0e]/70">The repository is private during the closed beta. Follow along on X for public updates, or request an invite for repo access.</p><div className="mt-6 flex flex-wrap gap-3"><a href="https://github.com/julienseven/certifera" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full bg-[#071b0e] px-4 py-3 text-[10px] font-bold uppercase tracking-[0.13em] text-[#73f59a]">GitHub (private) <Glyph name="arrow" size={14} /></a><a href="https://x.com/certiferaxyz" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-[#071b0e]/30 px-4 py-3 text-[10px] font-bold uppercase tracking-[0.13em] text-[#071b0e]">X <Glyph name="arrow" size={14} /></a></div></div></div></section></div></main>;
+  return (
+    <div className="console-surface min-h-screen bg-ink text-bone selection:bg-mint selection:text-mint-ink">
+      <SiteHeader links={siteLinks} active="/docs" progress />
+
+      <div className="mx-auto grid max-w-[1440px] border-x border-line lg:grid-cols-[264px_minmax(0,1fr)]">
+        <DocsSidebar />
+
+        <main className="min-w-0">
+          <header className="border-b border-line px-5 py-12 sm:px-10 lg:py-16">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-mint">{docsMeta.eyebrow}</p>
+            <h1 className="mt-4 max-w-3xl text-balance text-[clamp(2.2rem,4.6vw,3.9rem)] font-medium leading-[0.92] tracking-[-0.07em]">
+              {docsMeta.title}
+              <span className="text-mint">.</span>
+            </h1>
+            <p className="mt-6 max-w-2xl text-[15px] leading-[1.7] text-white/58">{docsMeta.standfirst}</p>
+          </header>
+
+          <div className="px-5 pb-16 sm:px-10">
+            {docGroups.map((group) => (
+              <section key={group.title} aria-label={group.title}>
+                {group.sections.map((section) => (
+                  <article key={section.id} id={section.id} className="scroll-mt-[84px] border-b border-line py-12 last:border-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/32">{group.title}</p>
+                    {/* The heading is the anchor target and its own permalink. */}
+                    <h2 className="group/heading mt-3 flex items-baseline gap-2 text-[clamp(1.6rem,2.6vw,2.1rem)] font-medium tracking-[-0.05em] text-bone">
+                      {section.title}
+                      <a
+                        href={`#${section.id}`}
+                        aria-label={`Link to ${section.title}`}
+                        className="text-mint opacity-0 transition-opacity duration-200 group-hover/heading:opacity-100 focus-visible:opacity-100"
+                      >
+                        <span aria-hidden className="text-[0.6em]">#</span>
+                      </a>
+                    </h2>
+                    <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-white/42">{section.summary}</p>
+
+                    <div className="max-w-[74ch]">
+                      {section.blocks.map((block, index) => (
+                        <ProseBlock key={index} block={block} />
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </section>
+            ))}
+
+            <div className="mt-12 flex flex-col gap-4 rounded-sm border border-mint/25 bg-mint/[0.06] p-6 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-mint">Controlled beta</p>
+                <p className="mt-2 max-w-md text-[13px] leading-relaxed text-white/65">
+                  Bring one outcome you cannot currently verify. Design partners get an API key, a console seat, and a direct escalation path.
+                </p>
+              </div>
+              <Link
+                href="/#access"
+                className="cta-primary inline-flex w-fit shrink-0 items-center gap-3 rounded-full bg-mint px-5 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-mint-ink"
+              >
+                Request access <Icon name="arrow" size={16} />
+              </Link>
+            </div>
+
+            <p className="mt-8 text-[11px] uppercase tracking-[0.14em] text-white/28">
+              {docSections.length} sections · last reviewed against the shipping API
+            </p>
+          </div>
+        </main>
+      </div>
+
+      <SiteFooter />
+      <MotionRoot spy={docSectionIds} />
+    </div>
+  );
 }

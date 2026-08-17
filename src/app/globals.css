@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 @theme {
+  /* Small phones are a real breakpoint here: the header CTA has two labels. */
+  --breakpoint-xs: 26rem;
+
   /* Surfaces */
   --color-ink: #060806;
   --color-panel: #0b100c;
@@ -41,6 +44,17 @@
     to {
       opacity: 1;
       transform: none;
+    }
+  }
+
+  --animate-nudge: nudge 900ms ease-in-out infinite;
+  @keyframes nudge {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+    }
+    50% {
+      transform: translate3d(4px, 0, 0);
     }
   }
 }
@@ -149,19 +163,313 @@ option {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
 }
 
-/* Scroll reveal. The hidden state is scoped to no-preference so that a
-   reduced-motion visitor never depends on the observer running at all. */
+/* ---------------------------------------------------------------------------
+   Scroll reveal. The hidden state is scoped to no-preference so that a
+   reduced-motion visitor never depends on the observer running at all, and each
+   variant only ever animates opacity, transform and filter — properties the
+   compositor can carry without a layout pass.
+   --------------------------------------------------------------------------- */
 [data-reveal] {
   transition:
     opacity 620ms var(--ease-out-expo),
-    transform 620ms var(--ease-out-expo);
+    transform 620ms var(--ease-out-expo),
+    filter 620ms var(--ease-out-expo);
   transition-delay: var(--reveal-delay, 0ms);
 }
 
 @media (prefers-reduced-motion: no-preference) {
   [data-reveal]:not([data-visible="true"]) {
     opacity: 0;
-    transform: translate3d(0, 18px, 0);
+  }
+
+  [data-reveal="up"]:not([data-visible="true"]) {
+    transform: translate3d(0, 22px, 0);
+  }
+
+  [data-reveal="left"]:not([data-visible="true"]) {
+    transform: translate3d(-26px, 0, 0);
+  }
+
+  [data-reveal="right"]:not([data-visible="true"]) {
+    transform: translate3d(26px, 0, 0);
+  }
+
+  [data-reveal="scale"]:not([data-visible="true"]) {
+    transform: scale(0.965);
+  }
+
+  [data-reveal="blur"]:not([data-visible="true"]) {
+    filter: blur(10px);
+    transform: translate3d(0, 12px, 0);
+  }
+
+  /* The capture-score bars fill in behind their card once it lands. */
+  [data-reveal]:not([data-visible="true"]) .score-bar {
+    width: 0;
+  }
+}
+
+.score-bar {
+  width: var(--fill, 0%);
+  transition: width 900ms var(--ease-out-expo);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+/* Everything below is a component class, so it sits in the components layer and a
+   Tailwind utility in the markup (a one-off border colour, say) still wins. */
+@layer components {
+
+/* ---------------------------------------------------------------------------
+   Pointer-reactive card. --mx/--my (cursor position) and --rx/--ry (tilt) are
+   written by MotionRoot; every card is inert until it is actually pointed at.
+   --------------------------------------------------------------------------- */
+.card {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid var(--line);
+  border-radius: 0.125rem;
+  transform: perspective(1100px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition:
+    transform 520ms var(--ease-out-expo),
+    border-color 320ms ease,
+    box-shadow 520ms var(--ease-out-expo);
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0;
+  background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%), rgba(115, 245, 154, 0.12), transparent 62%);
+  transition: opacity 420ms ease;
+}
+
+/* Hover effects are gated on a real hovering pointer. On a touch screen the
+   browser synthesises a hover that then sticks to whatever you last tapped. */
+@media (hover: hover) and (pointer: fine) {
+  .card:hover {
+    border-color: rgba(115, 245, 154, 0.4);
+  }
+
+  .card:hover::before,
+  .card[data-lifted]::before {
+    opacity: 1;
+  }
+
+  .card[data-lifted] {
+    box-shadow: 0 26px 60px -34px rgba(115, 245, 154, 0.45);
+  }
+
+  /* Cards that rise on hover instead of tilting. */
+  .lift:hover {
+    transform: translate3d(0, -3px, 0);
+  }
+}
+
+/* Touch gets a plain, immediate press state instead. */
+@media (hover: none) {
+  .card:active {
+    border-color: rgba(115, 245, 154, 0.35);
+  }
+}
+
+.card:focus-visible {
+  outline-offset: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   Header: reading progress and the scroll-spied nav.
+   --------------------------------------------------------------------------- */
+.scroll-progress {
+  position: absolute;
+  inset-inline: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--mint), #a8ffbe);
+  transform: scaleX(var(--scroll, 0));
+  transform-origin: left;
+  box-shadow: 0 0 12px rgba(115, 245, 154, 0.55);
+}
+
+.nav-link {
+  position: relative;
+  transition: color 260ms ease;
+}
+
+.nav-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -6px;
+  height: 1px;
+  width: 100%;
+  background: var(--mint);
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 380ms var(--ease-out-expo);
+}
+
+.nav-link:hover,
+.nav-link[aria-current] {
+  color: var(--mint);
+}
+
+.nav-link:hover::after,
+.nav-link[aria-current]::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+/* The docs rail reuses nav-link's scroll-spy, not its underline: a full-width
+   rule under a vertical list item reads as a divider, not as "you are here". */
+.doc-link::after {
+  display: none;
+}
+
+.doc-link:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.doc-link[aria-current] {
+  color: var(--mint);
+  background: rgba(115, 245, 154, 0.08);
+  box-shadow: inset 2px 0 0 var(--mint);
+}
+
+/* Inline links that draw their own underline on hover. */
+.link-underline {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0% 1px;
+  transition: background-size 420ms var(--ease-out-expo);
+}
+
+.link-underline:hover {
+  background-size: 100% 1px;
+}
+
+/* The primary CTA carries its own glow rather than a generic shadow utility. */
+.cta-primary {
+  transition:
+    box-shadow 420ms var(--ease-out-expo),
+    background-color 300ms ease;
+}
+
+.cta-primary:hover {
+  box-shadow: 0 18px 46px -18px rgba(115, 245, 154, 0.85);
+}
+
+/* ---------------------------------------------------------------------------
+   Lifecycle strip: one marker crosses the rail and each stage lights as it passes.
+   --------------------------------------------------------------------------- */
+.lifecycle-rail {
+  position: relative;
+  display: block;
+  height: 1px;
+  width: 24px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+@media (min-width: 40rem) {
+  .lifecycle-rail {
+    width: 34px;
+  }
+}
+
+/* The strip scrolls sideways on a phone; the fade is what says so. */
+.lifecycle-scroller {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  mask-image: linear-gradient(90deg, #000 0, #000 88%, transparent 100%);
+}
+
+.lifecycle-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 64rem) {
+  .lifecycle-scroller {
+    mask-image: none;
+  }
+}
+
+.lifecycle-stage {
+  transition: color 400ms ease, border-color 400ms ease, box-shadow 400ms ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lifecycle-rail::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: -40%;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, var(--mint), transparent);
+    animation: rail-travel 7.2s linear infinite;
+    animation-delay: calc(var(--i) * 0.6s - 7.2s);
+  }
+
+  .lifecycle-stage {
+    animation: stage-pass 7.2s ease-in-out infinite;
+    animation-delay: calc(var(--i) * 0.6s - 7.2s);
+  }
+}
+
+@keyframes rail-travel {
+  0% {
+    transform: translateX(0);
+  }
+  12% {
+    transform: translateX(350%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+@keyframes stage-pass {
+  0%,
+  10%,
+  100% {
+    color: inherit;
+    box-shadow: none;
+  }
+  4% {
+    color: var(--mint);
+    box-shadow: 0 0 22px -6px rgba(115, 245, 154, 0.75);
+  }
+}
+
+/* A one-pass sheen across the hero's mint line, on load only. Guarded: without
+   background-clip support the fill must stay opaque or the headline disappears. */
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .text-sweep {
+    background-image: linear-gradient(100deg, currentColor 38%, #eafff1 50%, currentColor 62%);
+    background-size: 260% 100%;
+    background-position: 100% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .text-sweep {
+      animation: sweep 2.6s var(--ease-out-expo) 700ms both;
+    }
+  }
+}
+
+}
+
+@keyframes sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
   }
 }
 

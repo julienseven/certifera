@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import { SiteHeader } from "@/components/marketing/site-header";
+import { MotionRoot } from "@/components/marketing/motion";
+import { siteLinks } from "@/content/nav";
 import Link from "next/link";
 import { pageMetadata } from "@/lib/seo";
 
@@ -133,16 +136,11 @@ function priorityTheme(priority: Priority) {
 export default function LaunchReadinessPage() {
   return (
     <main className="console-surface min-h-screen bg-[#060806] text-[#f4f7f2] selection:bg-[#73f59a] selection:text-[#071b0e]">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#060806]/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-[68px] max-w-[1440px] items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="group flex items-center gap-3" aria-label="Certifera home"><span className="grid h-7 w-7 place-items-center rounded-full bg-[#73f59a] text-[#071b0e] transition-transform group-hover:rotate-45"><span className="h-2.5 w-2.5 rotate-45 border-2 border-current" /></span><span className="text-[18px] font-medium tracking-[-0.05em]">certifera<span className="text-[#73f59a]">/</span></span></Link>
-          <div className="flex items-center gap-4"><span className="hidden text-[10px] font-semibold uppercase tracking-[0.15em] text-white/38 sm:block">Launch readiness / v0.1</span><Link href="/console" className="inline-flex items-center gap-2 rounded-full border border-[#73f59a]/35 bg-[#73f59a]/10 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.13em] text-[#a8ffbe] transition-colors hover:bg-[#73f59a] hover:text-[#071b0e]">Open console <Glyph name="arrow" size={14} /></Link></div>
-        </div>
-      </header>
+      <SiteHeader links={siteLinks} progress /><MotionRoot />
 
       <div className="mx-auto max-w-[1440px] px-5 py-10 sm:px-8 sm:py-14 lg:px-11 lg:py-18">
         <section className="grid gap-8 border-b border-white/10 pb-12 lg:grid-cols-[1.25fr_.75fr] lg:items-end">
-          <div><div className="inline-flex items-center gap-2 rounded-full border border-[#73f59a]/25 bg-[#73f59a]/[0.06] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#a8ffbe]"><span className="h-1.5 w-1.5 rounded-full bg-[#73f59a]" /> Decision brief</div><h1 className="mt-6 max-w-4xl text-[clamp(3.1rem,6vw,6.5rem)] font-medium leading-[0.86] tracking-[-0.085em]">What must be true before we ask the world to trust us<span className="text-[#73f59a]">.</span></h1></div>
+          <div><div className="inline-flex items-center gap-2 rounded-full border border-[#73f59a]/25 bg-[#73f59a]/[0.06] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#a8ffbe]"><span className="h-1.5 w-1.5 rounded-full bg-[#73f59a]" /> Decision brief</div><h1 className="mt-6 max-w-4xl text-balance text-[clamp(2.4rem,6vw,6.5rem)] font-medium leading-[0.86] tracking-[-0.085em]">What must be true before we ask the world to trust us<span className="text-[#73f59a]">.</span></h1></div>
           <div className="rounded-2xl border border-white/10 bg-[#0b100c]/90 p-5 sm:p-6"><div className="flex items-center gap-3 text-[#a8ffbe]"><Glyph name="shield" size={19} /><p className="text-[10px] font-semibold uppercase tracking-[0.15em]">Launch principle</p></div><p className="mt-4 text-[17px] font-medium leading-[1.28] tracking-[-0.025em] text-white/88">Do not launch a token or a broad marketplace first. Launch a reliable, insured operating loop for one valuable proof type.</p><p className="mt-4 text-[12px] leading-relaxed text-white/48">The test is simple: a real customer should be able to pay for a real outcome, inspect its proof, resolve a problem, and trust the audit trail.</p></div>
         </section>
 

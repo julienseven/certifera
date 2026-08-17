@@ -9,6 +9,7 @@ const MINT_DEEP = new THREE.Color("#1d9956");
 
 const RADIUS = 1.9;
 const HOTSPOTS = 5;
+const RIPPLES = 3;
 const ARCS = 4;
 const ARC_TRAIL = 16;
 const RING_SPARKS = 3;
@@ -87,18 +88,24 @@ function buildEdges(positions: Float32Array, count: number, k: number): Edge[] {
 }
 
 /**
- * Shared by the node, pulse and edge shaders: how much a point on the lattice is
- * excited right now, from the pointer's focus, the roaming activity zones, and
- * any expanding click ripple. Zones breathe, so a busy region swells and settles
- * rather than holding one brightness.
+ * Shared by the node, pulse and edge shaders.
+ *
+ * `excitementAt` is how much a point on the lattice is doing right now: the
+ * pointer's focus, the roaming activity zones, and any expanding proof ripples.
+ * `shapePosition` is where that point actually sits — the same excitement pushes
+ * the surface outward, so a busy region physically swells instead of only
+ * brightening, and every layer (nodes, edges, pulses) agrees on the deformation.
  */
-const excitement = /* glsl */ `
+const field = /* glsl */ `
   uniform float uTime;
   uniform float uRadius;
   uniform vec3 uFocus;
   uniform float uFocusStrength;
-  uniform vec4 uRipple;
+  uniform vec4 uRipples[${RIPPLES}];
   uniform vec3 uHotspots[${HOTSPOTS}];
+  uniform float uReveal;
+  uniform float uEnergy;
+  uniform float uDisplace;
 
   float excitementAt(vec3 p) {
     float boost = uFocusStrength * smoothstep(uRadius * 0.8, 0.0, distance(p, uFocus));
@@ -110,19 +117,33 @@ const excitement = /* glsl */ `
       boost += 0.95 * near * (0.5 + 0.5 * sin(uTime * 3.4 + float(i) * 2.1));
     }
 
-    // uRipple.w is the ripple's age, 0 to 1; negative means no ripple in flight.
-    if (uRipple.w >= 0.0) {
-      float front = uRipple.w * uRadius * 2.8;
-      float band = smoothstep(0.34, 0.0, abs(distance(p, uRipple.xyz) - front));
-      boost += band * (1.0 - uRipple.w) * 2.2;
+    // .w is each ripple's age, 0 to 1; negative means that slot is idle.
+    for (int i = 0; i < ${RIPPLES}; i += 1) {
+      vec4 ripple = uRipples[i];
+      if (ripple.w < 0.0) continue;
+      float front = ripple.w * uRadius * 2.8;
+      float band = smoothstep(0.34, 0.0, abs(distance(p, ripple.xyz) - front));
+      boost += band * (1.0 - ripple.w) * 2.2;
     }
 
-    return boost;
+    return boost * (1.0 + uEnergy * 0.6);
+  }
+
+  /**
+   * aPhase doubles as the reveal stagger, so the lattice assembles shell-first
+   * instead of popping in as one rigid ball.
+   */
+  vec3 shapePosition(vec3 p, float boost, float phase) {
+    float stagger = fract(phase * 0.15915494);
+    float grow = smoothstep(0.0, 1.0, clamp((uReveal - stagger * 0.34) / 0.66, 0.0, 1.0));
+    float breathe = 1.0 + 0.014 * sin(uTime * 0.55 + phase);
+    float swell = boost * uRadius * 0.075 * uDisplace;
+    return p * (mix(0.58, 1.0, grow) * breathe) + normalize(p) * swell;
   }
 `;
 
 const nodeVertex = /* glsl */ `
-  ${excitement}
+  ${field}
   attribute float aScale;
   attribute float aPhase;
   uniform float uSize;
@@ -132,13 +153,14 @@ const nodeVertex = /* glsl */ `
   varying float vFade;
 
   void main() {
-    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    float boost = excitementAt(position);
+    vec3 shaped = shapePosition(position, boost, aPhase);
+    vec4 viewPosition = modelViewMatrix * vec4(shaped, 1.0);
     // Depth is measured against the lattice centre, not the camera: view-space z is
     // always negative here, so fading on it directly would blank the whole field.
     float centreZ = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z;
     float towardsCamera = viewPosition.z - centreZ;
 
-    float boost = excitementAt(position);
     // A sharp power curve turns a slow sine into an occasional, brief flare, so
     // individual nodes verify and settle without any per-frame CPU bookkeeping.
     boost += uFlare * pow(max(0.0, sin(uTime * 0.55 + aPhase * 4.0)), 48.0) * 2.4;
@@ -169,15 +191,17 @@ const nodeFragment = /* glsl */ `
 `;
 
 const edgeVertex = /* glsl */ `
-  ${excitement}
+  ${field}
+  attribute float aPhase;
   varying float vFade;
 
   void main() {
-    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    float boost = excitementAt(position);
+    vec3 shaped = shapePosition(position, boost, aPhase);
+    vec4 viewPosition = modelViewMatrix * vec4(shaped, 1.0);
     float centreZ = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z;
     float towardsCamera = viewPosition.z - centreZ;
 
-    float boost = excitementAt(position);
     vFade = smoothstep(-uRadius * 1.2, uRadius * 0.5, towardsCamera) * (0.55 + boost * 2.4);
     gl_Position = projectionMatrix * viewPosition;
   }
@@ -192,6 +216,38 @@ const edgeFragment = /* glsl */ `
   void main() {
     vec3 tint = mix(uColor, uHotColor, clamp(vFade - 0.8, 0.0, 1.0));
     gl_FragColor = vec4(tint, clamp(vFade, 0.0, 1.6) * uOpacity);
+  }
+`;
+
+/**
+ * A rim-lit shell around the lattice. It carries no data — it gives the point
+ * cloud a body, so the sphere reads as a volume rather than a flat spray.
+ */
+const shellVertex = /* glsl */ `
+  varying vec3 vNormal;
+  varying vec3 vView;
+
+  void main() {
+    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    vNormal = normalize(normalMatrix * normal);
+    vView = normalize(-viewPosition.xyz);
+    gl_Position = projectionMatrix * viewPosition;
+  }
+`;
+
+const shellFragment = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform float uEnergy;
+  varying vec3 vNormal;
+  varying vec3 vView;
+
+  void main() {
+    float facing = abs(dot(normalize(vNormal), normalize(vView)));
+    float rim = pow(1.0 - facing, 3.2);
+    float breath = 0.82 + 0.18 * sin(uTime * 0.7);
+    gl_FragColor = vec4(uColor, rim * uOpacity * breath * (1.0 + uEnergy * 0.8));
   }
 `;
 
@@ -223,12 +279,16 @@ const sparkFragment = /* glsl */ `
 /**
  * A lattice of relay nodes with verification traffic running over it: pulses along
  * the edges, long-haul dispatch arcs between distant nodes, flaring individual
- * nodes, roaming activity zones, and sparks orbiting the settlement ring. It
- * answers the pointer and ripples outward on a click.
+ * nodes, roaming activity zones, and sparks orbiting the settlement ring.
+ *
+ * It answers the reader: the pointer swells and brightens the surface under it, a
+ * click lands a proof ripple, a fast sweep spins the whole lattice, and scrolling
+ * tilts the camera while the traffic speeds up with the page. Left alone it still
+ * moves — proofs land on their own every few seconds.
  *
  * The render loop is paused by default — it runs only while the canvas is visible,
  * on a foreground tab, and never at all under prefers-reduced-motion, which gets a
- * single static frame instead.
+ * single fully assembled frame instead.
  */
 export default function LatticeScene({ density = "full", variant = "hero" }: { density?: Density; variant?: Variant }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -269,22 +329,24 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
      * this canvas a tall, narrow box, where a fixed camera distance would push the
      * sphere straight out through the left and right edges.
      */
+    let baseCameraZ = 6;
     const fitCamera = () => {
       const halfVertical = THREE.MathUtils.degToRad(camera.fov) / 2;
       const halfHorizontal = Math.atan(Math.tan(halfVertical) * camera.aspect);
       const extent = RADIUS * (panel ? 1.72 : 1.5); // The orbit ring, not just the node sphere.
-      camera.position.z = Math.max(extent / Math.tan(halfVertical), extent / Math.tan(halfHorizontal));
+      baseCameraZ = Math.max(extent / Math.tan(halfVertical), extent / Math.tan(halfHorizontal));
       // Only a landscape hero has room to nudge the lattice clear of the headline.
       stage.position.set(!panel && camera.aspect > 1 ? 0.6 : 0, 0.05, 0);
       camera.updateProjectionMatrix();
     };
     fitCamera();
+    camera.position.z = baseCameraZ;
 
     const world = new THREE.Group();
     world.rotation.set(0.35, 0.6, 0.08);
     stage.add(world);
 
-    // --- Shared excitement uniforms ---------------------------------------
+    // --- Shared field uniforms --------------------------------------------
     // One object per uniform, reused across all the lattice materials, so a single
     // per-frame write updates the nodes, the pulses and the edges together.
     const shared = {
@@ -292,11 +354,19 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
       uRadius: { value: RADIUS },
       uFocus: { value: new THREE.Vector3(0, 0, RADIUS) },
       uFocusStrength: { value: 0 },
-      uRipple: { value: new THREE.Vector4(0, 0, 0, -1) },
+      uRipples: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, 0, -1)) },
       uHotspots: { value: Array.from({ length: HOTSPOTS }, () => new THREE.Vector3()) },
+      uReveal: { value: reduceMotion ? 1 : 0 },
+      uEnergy: { value: 0 },
     };
 
-    const makePointMaterial = (color: THREE.Color, size: number, opacity: number, twinkleRate: number, flare = 0) =>
+    const makePointMaterial = (
+      color: THREE.Color,
+      size: number,
+      opacity: number,
+      twinkleRate: number,
+      { flare = 0, displace = 1 } = {},
+    ) =>
       new THREE.ShaderMaterial({
         vertexShader: nodeVertex,
         fragmentShader: nodeFragment,
@@ -305,6 +375,7 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
         blending: THREE.AdditiveBlending,
         uniforms: {
           ...shared,
+          uDisplace: { value: displace },
           uSize: { value: size },
           uPixelRatio: { value: pixelRatio },
           uTwinkleRate: { value: twinkleRate },
@@ -328,22 +399,28 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
     nodeGeometry.setAttribute("position", new THREE.BufferAttribute(nodePositions, 3));
     nodeGeometry.setAttribute("aScale", new THREE.BufferAttribute(scales, 1));
     nodeGeometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-    const nodeMaterial = makePointMaterial(MINT, 24, panel ? 0.75 : 0.9, 1.15, 1);
+    const nodeMaterial = makePointMaterial(MINT, 24, panel ? 0.75 : 0.9, 1.15, { flare: 1 });
     world.add(new THREE.Points(nodeGeometry, nodeMaterial));
 
     // --- Edges -------------------------------------------------------------
+    // Each endpoint carries its node's phase, so an edge grows in step with the two
+    // nodes it connects rather than tearing away from them during the reveal.
     const edges = buildEdges(nodePositions, NODE_COUNT, NEIGHBOURS);
     const edgePositions = new Float32Array(edges.length * 6);
+    const edgePhases = new Float32Array(edges.length * 2);
     const edgeMidpoints = new Float32Array(edges.length * 3);
     edges.forEach((edge, index) => {
       edgePositions.set(nodePositions.subarray(edge.a * 3, edge.a * 3 + 3), index * 6);
       edgePositions.set(nodePositions.subarray(edge.b * 3, edge.b * 3 + 3), index * 6 + 3);
+      edgePhases[index * 2] = phases[edge.a];
+      edgePhases[index * 2 + 1] = phases[edge.b];
       for (let axis = 0; axis < 3; axis += 1) {
         edgeMidpoints[index * 3 + axis] = (nodePositions[edge.a * 3 + axis] + nodePositions[edge.b * 3 + axis]) * 0.5;
       }
     });
     const edgeGeometry = new THREE.BufferGeometry();
     edgeGeometry.setAttribute("position", new THREE.BufferAttribute(edgePositions, 3));
+    edgeGeometry.setAttribute("aPhase", new THREE.BufferAttribute(edgePhases, 1));
     const edgeMaterial = new THREE.ShaderMaterial({
       vertexShader: edgeVertex,
       fragmentShader: edgeFragment,
@@ -351,12 +428,33 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
       depthWrite: false,
       uniforms: {
         ...shared,
+        uDisplace: { value: 1 },
         uColor: { value: MINT_DEEP },
         uHotColor: { value: MINT },
         uOpacity: { value: panel ? 0.3 : 0.42 },
       },
     });
     world.add(new THREE.LineSegments(edgeGeometry, edgeMaterial));
+
+    // --- Shell: rim light that gives the point cloud a body -----------------
+    const shell = new THREE.Mesh(
+      new THREE.SphereGeometry(RADIUS * 1.015, 48, 32),
+      new THREE.ShaderMaterial({
+        vertexShader: shellVertex,
+        fragmentShader: shellFragment,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          uTime: shared.uTime,
+          uEnergy: shared.uEnergy,
+          uColor: { value: MINT_DEEP },
+          uOpacity: { value: panel ? 0.3 : 0.5 },
+        },
+      }),
+    );
+    world.add(shell);
 
     // --- Pulses: one travelling proof per edge, re-homed on arrival ---------
     const pulsePositions = new Float32Array(PULSE_COUNT * 3);
@@ -405,6 +503,7 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
 
     // --- Dispatch arcs: long-haul traffic between distant nodes -------------
     // Each arc is a comet: a head slerping along a great circle with a fading trail.
+    // They fly above the surface, so the swell must not drag them around.
     const arcPositions = new Float32Array(ARCS * ARC_TRAIL * 3);
     const arcScales = new Float32Array(ARCS * ARC_TRAIL);
     const arcPhases = new Float32Array(ARCS * ARC_TRAIL);
@@ -419,7 +518,7 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
     arcGeometry.setAttribute("position", new THREE.BufferAttribute(arcPositions, 3));
     arcGeometry.setAttribute("aScale", new THREE.BufferAttribute(arcScales, 1));
     arcGeometry.setAttribute("aPhase", new THREE.BufferAttribute(arcPhases, 1));
-    const arcMaterial = makePointMaterial(MINT_SOFT, 30, 1, 3.2);
+    const arcMaterial = makePointMaterial(MINT_SOFT, 30, 1, 3.2, { displace: 0 });
     world.add(new THREE.Points(arcGeometry, arcMaterial));
 
     const arcs = Array.from({ length: ARCS }, () => ({
@@ -519,6 +618,19 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
       angle: Math.random() * Math.PI * 2,
     }));
 
+    // --- Ripples: proofs landing on the lattice ----------------------------
+    // Three slots, round-robin, shared by autonomous bursts and pointer clicks, so
+    // a burst of activity overlaps instead of cancelling the ripple already running.
+    const rippleAges = new Float32Array(RIPPLES).fill(-1);
+    let rippleSlot = 0;
+    let nextBurst = 1.4;
+
+    const spawnRipple = (at: THREE.Vector3) => {
+      shared.uRipples.value[rippleSlot].set(at.x, at.y, at.z, 0);
+      rippleAges[rippleSlot] = 0;
+      rippleSlot = (rippleSlot + 1) % RIPPLES;
+    };
+
     // --- Pointer interaction ----------------------------------------------
     // The canvas stays pointer-events:none so the page's own controls keep working;
     // the pointer is tracked on the window and ray-projected onto the lattice instead.
@@ -532,7 +644,6 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
     const parallax = { x: 0, y: 0, targetX: 0, targetY: 0 };
     let focusStrengthTarget = 0;
     let spin = 0;
-    let rippleAge = -1;
     let lastPointer = { x: 0, y: 0, time: 0 };
 
     const projectPointer = (clientX: number, clientY: number) => {
@@ -567,12 +678,26 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
     const onPointerDown = (event: PointerEvent) => {
       const local = projectPointer(event.clientX, event.clientY);
       if (!local) return;
-      shared.uRipple.value.set(local.x, local.y, local.z, 0);
-      rippleAge = 0;
+      spawnRipple(local);
     };
 
     const onPointerLeave = () => {
       focusStrengthTarget = 0;
+    };
+
+    // --- Scroll: the page itself drives the camera --------------------------
+    // Reading down the page tilts the lattice over and pulls the camera back, and
+    // scroll speed feeds the same energy term the traffic and the rim light read.
+    let scrollProgress = 0;
+    let scrollTarget = 0;
+    let scrollEnergy = 0;
+    let lastScrollY = typeof window === "undefined" ? 0 : window.scrollY;
+
+    const onScroll = () => {
+      const span = document.documentElement.scrollHeight - window.innerHeight;
+      scrollTarget = span > 0 ? THREE.MathUtils.clamp(window.scrollY / span, 0, 1) : 0;
+      scrollEnergy = Math.min(1, scrollEnergy + Math.abs(window.scrollY - lastScrollY) / 900);
+      lastScrollY = window.scrollY;
     };
 
     const clock = new THREE.Clock();
@@ -588,14 +713,25 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
       const delta = Math.min(clock.getDelta(), 0.05);
       const elapsed = clock.getElapsedTime();
 
+      shared.uReveal.value = Math.min(1, shared.uReveal.value + delta * 0.75);
+
       spin *= 1 - Math.min(1, delta * 1.6);
-      world.rotation.y += delta * ((panel ? 0.045 : 0.075) + spin);
-      ring.rotation.z -= delta * (0.12 + spin * 0.4);
+      scrollEnergy *= 1 - Math.min(1, delta * 1.1);
+      scrollProgress += (scrollTarget - scrollProgress) * Math.min(1, delta * 3);
+      const energy = panel ? 0 : scrollEnergy;
+      shared.uEnergy.value = energy;
+
+      world.rotation.y += delta * ((panel ? 0.045 : 0.075) + spin + energy * 0.35);
+      world.rotation.x = 0.35 + scrollProgress * (panel ? 0 : 0.42);
+      ring.rotation.z -= delta * (0.12 + spin * 0.4 + energy * 0.6);
+      ring.rotation.x = Math.PI / 2.35 - scrollProgress * (panel ? 0 : 0.3);
+      shell.scale.setScalar(1 + energy * 0.03);
 
       parallax.x += (parallax.targetX - parallax.x) * 0.05;
       parallax.y += (parallax.targetY - parallax.y) * 0.05;
       camera.position.x = parallax.x * (panel ? 0.3 : 0.55);
       camera.position.y = -parallax.y * (panel ? 0.22 : 0.4);
+      camera.position.z = baseCameraZ * (1 + scrollProgress * (panel ? 0 : 0.16));
       camera.lookAt(0, 0, 0);
 
       // Hotspots orbit their own axis, so the busy regions keep moving.
@@ -607,14 +743,24 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
       shared.uFocus.value.lerp(focusTarget, Math.min(1, delta * 6));
       shared.uFocusStrength.value += (focusStrengthTarget - shared.uFocusStrength.value) * Math.min(1, delta * 4);
 
-      if (rippleAge >= 0) {
-        rippleAge += delta * 0.7;
-        shared.uRipple.value.w = rippleAge <= 1 ? rippleAge : -1;
-        if (rippleAge > 1) rippleAge = -1;
+      // Left alone, the lattice still verifies: a proof lands somewhere every few seconds.
+      nextBurst -= delta;
+      if (nextBurst <= 0) {
+        scratch.fromArray(nodePositions, Math.floor(Math.random() * NODE_COUNT) * 3);
+        spawnRipple(scratch);
+        nextBurst = 2.4 + Math.random() * 2.8;
       }
 
+      for (let i = 0; i < RIPPLES; i += 1) {
+        if (rippleAges[i] < 0) continue;
+        rippleAges[i] += delta * 0.7;
+        shared.uRipples.value[i].w = rippleAges[i] <= 1 ? rippleAges[i] : -1;
+        if (rippleAges[i] > 1) rippleAges[i] = -1;
+      }
+
+      const traffic = 1 + energy * 1.6;
       for (let i = 0; i < PULSE_COUNT; i += 1) {
-        pulseT[i] += delta * pulseSpeed[i];
+        pulseT[i] += delta * pulseSpeed[i] * traffic;
         if (pulseT[i] >= 1) {
           pulseT[i] = 0;
           pulseEdge[i] = pickEdge();
@@ -623,14 +769,14 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
       writePulses();
 
       for (const arc of arcs) {
-        arc.t += delta * arc.speed;
+        arc.t += delta * arc.speed * traffic;
         // The tail needs time to clear the destination before the arc is recycled.
         if (arc.t > 1.35) respawnArc(arc);
       }
       writeArcs();
 
       for (let i = 0; i < RING_SPARKS; i += 1) {
-        sparkAngles[i] += delta * sparkSpeeds[i];
+        sparkAngles[i] += delta * sparkSpeeds[i] * traffic;
         sparkPositions[i * 3] = Math.cos(sparkAngles[i]) * RADIUS * 1.36;
         sparkPositions[i * 3 + 1] = Math.sin(sparkAngles[i]) * RADIUS * 1.36;
       }
@@ -676,6 +822,7 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
     if (!reduceMotion) {
       window.addEventListener("pointermove", onPointerMove, { passive: true });
       window.addEventListener("pointerdown", onPointerDown, { passive: true });
+      window.addEventListener("scroll", onScroll, { passive: true });
       document.addEventListener("pointerleave", onPointerLeave);
     }
 
@@ -692,6 +839,7 @@ export default function LatticeScene({ density = "full", variant = "hero" }: { d
       document.removeEventListener("pointerleave", onPointerLeave);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("scroll", onScroll);
       scene.traverse((object) => {
         if (object instanceof THREE.Points || object instanceof THREE.LineSegments || object instanceof THREE.Mesh) {
           object.geometry.dispose();
