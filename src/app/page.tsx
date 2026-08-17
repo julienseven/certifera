@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { SiteFooter } from "@/components/marketing/chrome";
-import { HeroArtwork } from "@/components/three/hero-artwork";
+import { LatticeArtwork } from "@/components/three/lattice-artwork";
 import { SITE_URL, jsonLd, pageMetadata } from "@/lib/seo";
 import { ScrollReveal, WaitlistForm } from "./landing-client";
 
@@ -227,7 +227,9 @@ export default function HomePage() {
         </header>
 
         <div id="top" className="relative grid scroll-mt-[88px] overflow-hidden border-b border-line lg:grid-cols-[minmax(0,1fr)_300px]">
-          <HeroArtwork className="pointer-events-none absolute inset-y-0 right-0 z-0 w-[min(92%,780px)] opacity-55 [mask-image:radial-gradient(ellipse_at_64%_50%,#000_26%,transparent_74%)] sm:w-[min(64%,780px)] sm:opacity-100 lg:right-[300px]" />
+          {/* Phones get a short, top-anchored band: stretching the artwork down the
+              full stacked hero would hand it a tall, narrow box to frame a sphere in. */}
+          <LatticeArtwork className="pointer-events-none absolute right-0 top-0 z-0 h-[440px] w-full opacity-75 [mask-image:radial-gradient(ellipse_at_64%_50%,#000_26%,transparent_74%)] sm:inset-y-0 sm:h-auto sm:w-[min(64%,780px)] sm:opacity-100 lg:right-[300px]" />
           <div className="relative z-10 px-5 pb-14 pt-16 sm:px-8 sm:pb-20 sm:pt-24 lg:px-11 lg:pb-24 lg:pt-28">
             <div className="animate-rise mb-9 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-mint-soft">
               <span className="animate-mint-pulse h-2 w-2 rounded-full bg-mint" />
