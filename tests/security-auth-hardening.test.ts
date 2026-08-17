@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { passwordResetTokens, users } from "@/db/schema";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { operationalEvents, passwordResetTokens, users } from "@/db/schema";
+import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 
 /**
  * The unauthenticated edge of the auth surface: the three routes a stranger can
@@ -249,6 +249,38 @@ describe("maintenance entrypoint", () => {
       // The console's own trigger is a POST and keeps working.
       expect((await POST(cron("POST"))).status).toBe(200);
     } finally {
+      if (previous === undefined) delete process.env.CERTIFERA_CRON_SECRET;
+      else process.env.CERTIFERA_CRON_SECRET = previous;
+    }
+  });
+
+  it("raises an operational event when the sweep itself fails", async () => {
+    const previous = process.env.CERTIFERA_CRON_SECRET;
+    process.env.CERTIFERA_CRON_SECRET = secret;
+    // The real failure this reproduces: production was missing the migration
+    // adding payouts.release_claimed_at, so the sweep threw on every run for
+    // two days while the only trace was a red workflow nobody was watching.
+    vi.doMock("@/lib/maintenance", () => ({
+      runMaintenance: () => Promise.reject(new Error('column "release_claimed_at" does not exist')),
+    }));
+    try {
+      vi.resetModules();
+      const { GET } = await import("@/app/api/internal/maintenance/route");
+      const before = new Date();
+
+      expect((await GET(cron("GET", `Bearer ${secret}`))).status).toBe(500);
+
+      const [event] = await db
+        .select()
+        .from(operationalEvents)
+        .where(and(eq(operationalEvents.code, "maintenance_run_failed"), gte(operationalEvents.createdAt, before)))
+        .limit(1);
+      expect(event).toBeDefined();
+      expect(event.message).toContain("release_claimed_at");
+      await db.delete(operationalEvents).where(eq(operationalEvents.id, event.id));
+    } finally {
+      vi.doUnmock("@/lib/maintenance");
+      vi.resetModules();
       if (previous === undefined) delete process.env.CERTIFERA_CRON_SECRET;
       else process.env.CERTIFERA_CRON_SECRET = previous;
     }

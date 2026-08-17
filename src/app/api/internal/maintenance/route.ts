@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { getRequestIdentity, hasRole, writeAudit } from "@/lib/auth";
 import { runMaintenance } from "@/lib/maintenance";
+import { reportException } from "@/lib/observability";
 
 function hasCronAuthorization(request: Request) {
   const configured = process.env.CERTIFERA_CRON_SECRET || process.env.CRON_SECRET;
@@ -32,7 +33,13 @@ async function handle(request: Request) {
     if (identity) await writeAudit({ actorId: identity.userId, action: "maintenance_run", resourceType: "system", resourceId: result.runId, request, data: { overdueChecked: result.overdueChecked } });
     return Response.json({ ok: true, result });
   } catch (error) {
-    console.error("maintenance run failed", error);
+    // Reported, not just logged. A console line goes to the platform's log
+    // stream, which nobody reads on a schedule — this sweep failed hourly for
+    // two days on a missing column and the only trace was a red workflow. The
+    // operational event is what the alert webhook and the Operations Center
+    // read, and a sweep that is not running means SLA breaches are not being
+    // escalated at all.
+    await reportException({ service: "maintenance", code: "maintenance_run_failed", error, resourceType: "system" });
     return Response.json({ error: "Maintenance execution failed." }, { status: 500 });
   }
 }

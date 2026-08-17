@@ -1,0 +1,54 @@
+name: Apply migrations
+
+# Nothing was responsible for applying migrations to production.
+#
+# CI applies them to a throwaway Postgres service container, which proves the
+# files run — not that they ran anywhere that serves traffic. So 0001 shipped
+# with the code that reads the columns it adds, Vercel deployed on push, and the
+# DDL never landed: the hourly sweep 500'd for two days on a column that did not
+# exist, and the payout release path reads the same two columns.
+#
+# Migrations run here, on the same push that triggers the deploy. They are
+# additive by convention (expand first, contract in a later release), so the
+# previous version of the code keeps working against the new schema for the
+# minutes the two overlap. A migration that removes or renames anything must be
+# split across two releases rather than relying on this ordering.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Two runs applying DDL to one database is how a half-migrated schema happens.
+  # Never cancel in flight: an interrupted run is worse than a queued one.
+  group: migrate-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # `npm run db:migrate` is a no-op when everything is already applied, so a
+    # push that changes no migration costs one connection and exits clean.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Apply migrations to production
+        env:
+          # The unpooled companion is preferred by scripts/migrate.ts when it
+          # names the same host, because DDL through a transaction-mode pooler
+          # can land on different backends between statements.
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          DATABASE_URL_UNPOOLED: ${{ secrets.PRODUCTION_DATABASE_URL_UNPOOLED }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::PRODUCTION_DATABASE_URL is not set on this repository."
+            exit 1
+          fi
+          npm run db:migrate
