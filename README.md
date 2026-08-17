@@ -45,9 +45,23 @@ npm run db:migrate
 
 CI applies migrations and fails if `schema.ts` and `./drizzle` have drifted apart.
 
+Production migrations run from the `Apply migrations` workflow on every push to
+`main`, alongside the deploy that push triggers. It needs
+`PRODUCTION_DATABASE_URL` and `PRODUCTION_DATABASE_URL_UNPOOLED` as repository
+secrets, and fails loudly when they are missing rather than skipping quietly.
+
+Because code and schema land together, migrations must be additive: expand in
+one release, contract in a later one. A migration that drops or renames anything
+has to be split across two releases, or the running version breaks during the
+minutes the two overlap. This is not theoretical — `0001` shipped with the code
+that reads its columns, nothing applied the DDL, and the hourly sweep returned
+500 for two days on a column that did not exist.
+
 Adopting migrations on a database that already has the schema (one time, per
 environment): confirm the schema matches, then record the baseline as applied
-rather than re-running its DDL.
+rather than re-running its DDL. Until this is done, `db:migrate` will try to
+replay `0000_baseline.sql` against objects that already exist; it fails inside
+its own transaction and rolls back, so the schema is never left half-changed.
 
 ```bash
 npm run db:baseline -- 0000_baseline
