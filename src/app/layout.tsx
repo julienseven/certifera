@@ -70,9 +70,6 @@ export const metadata: Metadata = {
     creator: X_HANDLE,
     site: X_HANDLE,
   },
-  other: {
-    "ory-verify": "orynth-1fee65a2ebac4cfca2519829f51e8e8d",
-  },
 };
 
 export const viewport: Viewport = {
