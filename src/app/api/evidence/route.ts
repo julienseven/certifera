@@ -8,6 +8,9 @@ import { deletePrivateEvidence, readPrivateEvidence, scanEvidence, storePrivateE
 import { and, eq, isNull } from "drizzle-orm";
 
 const MAX_BYTES = 8 * 1024 * 1024;
+// Multipart wraps the file in a boundary, part headers, and the work order
+// field, so a legitimate 8 MB upload declares a little more than 8 MB.
+const MAX_BODY_BYTES = MAX_BYTES + 64 * 1024;
 const allowed = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
 function safeName(name: string) {
@@ -25,6 +28,14 @@ function matchesSignature(bytes: Buffer, type: string) {
 export async function POST(request: Request) {
   const auth = await requireIdentity(request, { roles: ["relay", "admin"], scope: "proofs:write" });
   if (!auth.identity) return auth.response;
+  // The 8 MB ceiling below is measured on the parsed file, which is one step too
+  // late: formData() has already pulled the entire body into memory by then, so
+  // any caller holding a relay key could make the process buffer a payload of
+  // any size before being told the payload was too large. A declared length past
+  // the ceiling is refused before a byte is read. A request that declares no
+  // length still falls through to the check on the parsed file.
+  const declaredBytes = Number(request.headers.get("content-length"));
+  if (declaredBytes > MAX_BODY_BYTES) return Response.json({ error: "Evidence must be between 1 byte and 8 MB." }, { status: 413 });
   try {
     const formData = await request.formData();
     const workOrderEntry = formData.get("workOrderId");
@@ -51,36 +62,43 @@ export async function POST(request: Request) {
 
     const assetId = randomUUID();
     const stored = await storePrivateEvidence({ assetId, bytes, contentType: file.type, sha256 });
-    try {
-      const [asset] = await db.insert(evidenceAssets).values({
-        id: assetId,
-        workOrderId,
-        relayId: workOrder.selectedRelayId,
-        uploadedByUserId: auth.identity.userId,
-        originalName,
-        contentType: file.type,
-        storageProvider: stored.provider,
-        storageKey: stored.storageKey,
-        contentBase64: stored.contentBase64,
-        byteSize: bytes.byteLength,
-        sha256,
-        scanStatus: scan.status,
-        scannedAt: scan.status === "validated" ? new Date() : null,
-        intelligenceScore: intelligence.score,
-        intelligenceFlags: intelligence.flags,
-        capturedMetadata: intelligence.metadata,
-        intelligenceReviewedAt: new Date(),
-      }).returning({ id: evidenceAssets.id, originalName: evidenceAssets.originalName, contentType: evidenceAssets.contentType, byteSize: evidenceAssets.byteSize, sha256: evidenceAssets.sha256, scanStatus: evidenceAssets.scanStatus, intelligenceScore: evidenceAssets.intelligenceScore, intelligenceFlags: evidenceAssets.intelligenceFlags });
-      await writeAudit({ actorId: auth.identity.userId, action: "evidence_uploaded", resourceType: "evidence_asset", resourceId: asset.id, request, data: { workOrderId, byteSize: asset.byteSize, sha256: asset.sha256, scanStatus: asset.scanStatus, intelligenceScore: asset.intelligenceScore } });
-      return Response.json({ asset }, { status: 201 });
-    } catch (error) {
-      await deletePrivateEvidence({ storageProvider: stored.provider, storageKey: stored.storageKey });
-      throw error;
-    }
+    // The compensating delete covers exactly the window between writing the
+    // bytes and committing the row that owns them. It deliberately stops there:
+    // an audit write failing after the row committed used to take this branch
+    // too, deleting the object behind a live asset and leaving a sha256
+    // attesting to bytes nobody could read again.
+    const [asset] = await db.insert(evidenceAssets).values({
+      id: assetId,
+      workOrderId,
+      relayId: workOrder.selectedRelayId,
+      uploadedByUserId: auth.identity.userId,
+      originalName,
+      contentType: file.type,
+      storageProvider: stored.provider,
+      storageKey: stored.storageKey,
+      contentBase64: stored.contentBase64,
+      byteSize: bytes.byteLength,
+      sha256,
+      scanStatus: scan.status,
+      scannedAt: scan.status === "validated" ? new Date() : null,
+      intelligenceScore: intelligence.score,
+      intelligenceFlags: intelligence.flags,
+      capturedMetadata: intelligence.metadata,
+      intelligenceReviewedAt: new Date(),
+    }).returning({ id: evidenceAssets.id, originalName: evidenceAssets.originalName, contentType: evidenceAssets.contentType, byteSize: evidenceAssets.byteSize, sha256: evidenceAssets.sha256, scanStatus: evidenceAssets.scanStatus, intelligenceScore: evidenceAssets.intelligenceScore, intelligenceFlags: evidenceAssets.intelligenceFlags })
+      .catch(async (error) => {
+        await deletePrivateEvidence({ storageProvider: stored.provider, storageKey: stored.storageKey });
+        throw error;
+      });
+    await writeAudit({ actorId: auth.identity.userId, action: "evidence_uploaded", resourceType: "evidence_asset", resourceId: asset.id, request, data: { workOrderId, byteSize: asset.byteSize, sha256: asset.sha256, scanStatus: asset.scanStatus, intelligenceScore: asset.intelligenceScore } });
+    return Response.json({ asset }, { status: 201 });
   } catch (error) {
     console.error("evidence upload failed", error);
     await reportException({ service: "evidence", code: "upload_failed", error, resourceType: "evidence_asset" });
-    return Response.json({ error: error instanceof Error ? error.message : "Could not securely store the evidence file." }, { status: 500 });
+    // Fixed wording, like every other handler here: error.message carried the
+    // storage backend's configuration and Postgres constraint text back to the
+    // relay that triggered the failure.
+    return Response.json({ error: "Could not securely store the evidence file." }, { status: 500 });
   }
 }
 

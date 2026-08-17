@@ -230,6 +230,35 @@ describe("scanEvidence", () => {
     expect(result).toEqual({ status: "validated" });
     vi.unstubAllGlobals();
   });
+
+  it("gives the scanner call a deadline so an unanswered scan cannot hold the upload open", async () => {
+    process.env.CERTIFERA_MALWARE_SCAN_WEBHOOK = "https://scan.example/webhook";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ clean: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await scanEvidence(input);
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to pending (when required) if the scanner cannot be reached at all", async () => {
+    // A transport failure is the same event as an unusable reply. It used to
+    // throw instead, so the upload returned 500 rather than the fail-closed
+    // "pending" an error *response* from the same scanner would have produced.
+    process.env.CERTIFERA_MALWARE_SCAN_WEBHOOK = "https://scan.example/webhook";
+    process.env.CERTIFERA_EVIDENCE_SCAN_REQUIRED = "true";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("fetch failed")));
+    const result = await scanEvidence(input);
+    expect(result).toEqual({ status: "pending" });
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to validated (when not required) if the scanner cannot be reached at all", async () => {
+    process.env.CERTIFERA_MALWARE_SCAN_WEBHOOK = "https://scan.example/webhook";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(Object.assign(new Error("The operation was aborted."), { name: "TimeoutError" })));
+    const result = await scanEvidence(input);
+    expect(result).toEqual({ status: "validated" });
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("evidenceStorageStatus", () => {

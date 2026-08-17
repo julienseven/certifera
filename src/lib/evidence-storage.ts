@@ -93,11 +93,32 @@ export async function deletePrivateEvidence(asset: { storageProvider: string; st
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: asset.storageKey }));
 }
 
+/**
+ * How long the upload request will wait on the scanner.
+ *
+ * The call carries the whole file base64-encoded, so it is not fast, but it is
+ * synchronous with a relay's upload and cannot be allowed to run long.
+ */
+const SCAN_TIMEOUT_MS = 20_000;
+
 export async function scanEvidence(input: { bytes: Buffer; fileName: string; contentType: string; sha256: string }) {
   const scannerUrl = process.env.CERTIFERA_MALWARE_SCAN_WEBHOOK;
   const scanRequired = process.env.CERTIFERA_EVIDENCE_SCAN_REQUIRED === "true";
   if (!scannerUrl) return scanRequired ? { status: "pending" as const } : { status: "validated" as const };
 
+  /**
+   * Bounded, and a transport failure is treated as the same event as an
+   * unusable reply.
+   *
+   * The call had no deadline, so a scanner that accepted the connection and
+   * never answered held the upload request open — with the file buffered behind
+   * it — until the platform killed the invocation, and the relay's retry opened
+   * another. A scanner that could not be reached at all threw instead, so an
+   * outage returned 500 on every upload even where scanning was optional, while
+   * a scanner answering 502 degraded to the fallback. Both now take the
+   * fallback: blocked at "pending" where scanning is required, cleared where it
+   * is not, and recorded either way.
+   */
   const response = await fetch(scannerUrl, {
     method: "POST",
     headers: {
@@ -110,14 +131,17 @@ export async function scanEvidence(input: { bytes: Buffer; fileName: string; con
       sha256: input.sha256,
       contentBase64: input.bytes.toString("base64"),
     }),
-  });
-  const payload = (await response.json().catch(() => null)) as { clean?: boolean } | null;
-  if (!response.ok || !payload) {
+    signal: AbortSignal.timeout(SCAN_TIMEOUT_MS),
+  }).catch(() => null);
+  const payload = response ? ((await response.json().catch(() => null)) as { clean?: boolean } | null) : null;
+  if (!response?.ok || !payload) {
     await recordOperationalEvent({
       level: scanRequired ? "warning" : "error",
       service: "evidence",
       code: "scan_response_invalid",
-      message: `Malware scanner returned an unusable response (status ${response.status}).`,
+      message: response
+        ? `Malware scanner returned an unusable response (status ${response.status}).`
+        : `Malware scanner could not be reached within ${SCAN_TIMEOUT_MS}ms.`,
       resourceType: "evidence_scan",
       data: { sha256: input.sha256, scanRequired, fallbackStatus: scanRequired ? "pending" : "validated" },
     });
