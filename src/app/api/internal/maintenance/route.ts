@@ -1,10 +1,15 @@
+import { timingSafeEqual } from "node:crypto";
 import { getRequestIdentity, hasRole, writeAudit } from "@/lib/auth";
 import { runMaintenance } from "@/lib/maintenance";
 
 function hasCronAuthorization(request: Request) {
   const configured = process.env.CERTIFERA_CRON_SECRET || process.env.CRON_SECRET;
-  const authorization = request.headers.get("authorization") || "";
-  return Boolean(configured && authorization === `Bearer ${configured}`);
+  if (!configured) return false;
+  // Compared in constant time: this is a bearer secret, and `===` on strings
+  // stops at the first byte that differs.
+  const presented = Buffer.from(request.headers.get("authorization") || "");
+  const expected = Buffer.from(`Bearer ${configured}`);
+  return presented.length === expected.length && timingSafeEqual(presented, expected);
 }
 
 // The hourly sweep is bounded per run, but each SLA escalation is its own
@@ -13,7 +18,12 @@ export const maxDuration = 60;
 
 async function handle(request: Request) {
   const cronAuthorized = hasCronAuthorization(request);
-  const identity = cronAuthorized ? null : await getRequestIdentity(request);
+  // A GET is whatever an attacker can make a browser fetch — a link, an image,
+  // a prefetch — and the session cookie is same-site lax, so a top-level
+  // navigation still carries an admin's credential to it. The scheduler proves
+  // itself with a header nobody can make a browser send, so it keeps GET; the
+  // ambient-credential path is restricted to the verb the console already uses.
+  const identity = cronAuthorized || request.method !== "POST" ? null : await getRequestIdentity(request);
   if (!cronAuthorized && (!identity || !hasRole(identity, ["admin"]))) {
     return Response.json({ error: "Maintenance requires an admin session or CRON secret." }, { status: 401 });
   }
@@ -30,7 +40,8 @@ async function handle(request: Request) {
 /**
  * Vercel Cron invokes its target with GET, so a POST-only route would have
  * returned 405 on every scheduled run and the sweep would never have fired.
- * POST stays for manual admin triggering.
+ * POST stays for manual admin triggering — and is the only verb that accepts a
+ * session, per the note above.
  */
 export const GET = handle;
 export const POST = handle;

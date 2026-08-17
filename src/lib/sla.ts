@@ -20,13 +20,36 @@ export type SlaEscalation =
   | { ok: true; action: "review_escalated" | "execution_reopened"; status: "review" | "open"; slaStatus: string; reputationDelta?: number }
   | { ok: false; error: string; status: number };
 
+/**
+ * The sla_status each phase's escalation writes, which is also the record that
+ * the phase has already been escalated.
+ *
+ * Reopening an execution moves the outcome out of the matched state, so a
+ * second attempt finds no window. A review escalation has nothing equivalent:
+ * the outcome stays in "review" with its deadline still in the past, so without
+ * this the same overdue review is escalated again on every sweep. Checked per
+ * phase rather than as "has breached something", because late evidence leaves
+ * an outcome in review carrying execution_breached and that review window still
+ * deserves its own escalation.
+ */
+const ESCALATED_STATUS = { execution: "execution_breached", review: "review_breached" } as const;
+
 export async function escalateOverdueSla(workOrderId: string, actor: string): Promise<SlaEscalation> {
   return db.transaction(async (tx) => {
-    const [workOrder] = await tx.select().from(workOrders).where(eq(workOrders.id, workOrderId)).limit(1);
+    // Locked, not just read: the hourly cron and an operator pressing "run
+    // maintenance" reach the same overdue outcome concurrently, and both would
+    // otherwise decide it needs escalating before either wrote its verdict —
+    // charging the relay two reputation penalties for one missed commitment.
+    // Under read committed the loser re-reads the row this released, so it sees
+    // the escalation that just landed.
+    const [workOrder] = await tx.select().from(workOrders).where(eq(workOrders.id, workOrderId)).limit(1).for("update");
     if (!workOrder) return { ok: false, error: "This request no longer exists.", status: 404 };
     const snapshot = getSlaSnapshot(workOrder);
     if (!snapshot.phase) return { ok: false, error: "This request has no active SLA window to evaluate.", status: 409 };
     if (!snapshot.isOverdue) return { ok: false, error: "The active SLA window has not expired yet.", status: 409 };
+    if (workOrder.slaStatus === ESCALATED_STATUS[snapshot.phase]) {
+      return { ok: false, error: "This SLA window has already been escalated.", status: 409 };
+    }
 
     if (snapshot.phase === "review") {
       await tx.update(workOrders).set({ slaStatus: "review_breached", updatedAt: new Date() }).where(eq(workOrders.id, workOrderId));

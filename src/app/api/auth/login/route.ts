@@ -15,6 +15,16 @@ function unknownAccountHash() {
   return timingGuardHash;
 }
 
+/**
+ * Advances the lockout counter for an account that is active and not already
+ * locked, which is what the caller has established by the time it gets here.
+ */
+async function registerFailedAttempt(user: typeof users.$inferSelect) {
+  const failures = user.failedLoginCount + 1;
+  const lockedUntil = failures >= MAX_FAILED_LOGINS ? new Date(Date.now() + LOCKOUT_MINUTES * 60_000) : null;
+  await db.update(users).set({ failedLoginCount: failures, lockedUntil }).where(eq(users.id, user.id));
+}
+
 export async function POST(request: Request) {
   const rate = await enforceAnonymousRateLimit(request, "login", 10);
   if (!rate.allowed) return Response.json({ error: "Too many sign-in attempts. Please try again shortly." }, { status: 429, headers: { "retry-after": String(rate.retryAfter) } });
@@ -37,9 +47,7 @@ export async function POST(request: Request) {
       || !passwordOk;
     if (denied) {
       if (user && user.status === "active" && (!user.lockedUntil || user.lockedUntil <= now)) {
-        const failures = user.failedLoginCount + 1;
-        const lockedUntil = failures >= MAX_FAILED_LOGINS ? new Date(Date.now() + LOCKOUT_MINUTES * 60_000) : null;
-        await db.update(users).set({ failedLoginCount: failures, lockedUntil }).where(eq(users.id, user.id));
+        await registerFailedAttempt(user);
       }
       await writeAudit({ action: "login_failed", resourceType: "auth", request, data: { email: email || null } });
       return Response.json({ error: "Email, password, verification, or account status is incorrect." }, { status: 401 });
@@ -47,6 +55,11 @@ export async function POST(request: Request) {
     if (!user) return Response.json({ error: "Email, password, verification, or account status is incorrect." }, { status: 401 });
 
     if (user.mfaEnabledAt && (!user.mfaSecret || !validateTotp(decryptField(user.mfaSecret), mfaCode))) {
+      // A wrong code is a failed sign-in like a wrong password. Skipping the
+      // counter here left the second factor as the only unmetered one: whoever
+      // already had the password could walk the six-digit space against an
+      // account that never locked, with only the per-IP window in the way.
+      await registerFailedAttempt(user);
       await writeAudit({ actorId: user.id, action: "login_mfa_failed", resourceType: "auth", request });
       return Response.json({ error: "Authenticator code is required or invalid." }, { status: 401 });
     }

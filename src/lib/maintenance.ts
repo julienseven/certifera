@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { apiKeys, apiRateLimits, emailVerificationTokens, maintenanceRuns, passwordResetTokens, payouts, sessions, workOrders } from "@/db/schema";
 import { recordOperationalEvent, reportException } from "@/lib/observability";
 import { escalateOverdueSla } from "@/lib/sla";
-import { and, eq, lt, or } from "drizzle-orm";
+import { and, eq, lt, ne, or } from "drizzle-orm";
 
 const DEMO_API_KEY_NAME = "Demo (auto-issued)";
 
@@ -33,7 +33,13 @@ export async function runMaintenance(trigger: string) {
       .from(workOrders)
       .where(or(
         and(eq(workOrders.status, "matched"), lt(workOrders.executionDueAt, now)),
-        and(eq(workOrders.status, "review"), lt(workOrders.reviewDueAt, now)),
+        // An escalated review keeps its status and its expired deadline, so it
+        // matches this predicate on every later run too. Excluding the ones
+        // already escalated is what stops a few undecided reviews from
+        // occupying the whole per-run budget while outcomes that breached since
+        // wait for a slot. Reopening an execution changes its status, so that
+        // branch drops out on its own.
+        and(eq(workOrders.status, "review"), lt(workOrders.reviewDueAt, now), ne(workOrders.slaStatus, "review_breached")),
       ))
       .limit(MAX_ESCALATIONS_PER_RUN + 1);
     // Overshoot by one to detect a backlog without a second count query.
