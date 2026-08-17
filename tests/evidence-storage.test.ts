@@ -173,7 +173,7 @@ describe("deletePrivateEvidence", () => {
 });
 
 describe("scanEvidence", () => {
-  const input = { bytes: Buffer.from("scan-me"), fileName: "evidence.jpg", contentType: "image/jpeg", sha256: "abc123" };
+  const input = { assetId: "11111111-2222-3333-4444-555555555555", bytes: Buffer.from("scan-me"), fileName: "evidence.jpg", contentType: "image/jpeg", sha256: "abc123" };
 
   it("validates immediately when no scanner is configured and scanning is not required", async () => {
     const result = await scanEvidence(input);
@@ -237,6 +237,22 @@ describe("scanEvidence", () => {
     vi.stubGlobal("fetch", fetchMock);
     await scanEvidence(input);
     expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    vi.unstubAllGlobals();
+  });
+
+  it("tells the scanner where to answer if it misses the upload window", async () => {
+    // Without this the 20s fallback to "pending" is terminal: the scanner has
+    // no way to deliver the verdict it eventually reaches.
+    process.env.CERTIFERA_MALWARE_SCAN_WEBHOOK = "https://scan.example/webhook";
+    process.env.NEXT_PUBLIC_SITE_URL = "https://certifera.example/";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ clean: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await scanEvidence(input);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      assetId: input.assetId,
+      callbackUrl: "https://certifera.example/api/internal/evidence-scan",
+    });
+    delete process.env.NEXT_PUBLIC_SITE_URL;
     vi.unstubAllGlobals();
   });
 

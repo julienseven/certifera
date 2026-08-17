@@ -156,9 +156,21 @@ describe("scan gating", () => {
     expect(problemsFor({ CERTIFERA_EVIDENCE_SCAN_REQUIRED: "true" })).toContain("CERTIFERA_MALWARE_SCAN_WEBHOOK");
   });
 
-  it("accepts required scanning once a scanner is configured", () => {
+  it("refuses required scanning with no address for the scanner to answer at", () => {
+    // A verdict that misses the upload window has to arrive somehow, and the
+    // callback URL is built from the site URL.
     expect(
       problemsFor({ CERTIFERA_EVIDENCE_SCAN_REQUIRED: "true", CERTIFERA_MALWARE_SCAN_WEBHOOK: "https://scanner.example/scan" }),
+    ).toContain("NEXT_PUBLIC_SITE_URL");
+  });
+
+  it("accepts required scanning once a scanner and a callback address exist", () => {
+    expect(
+      problemsFor({
+        CERTIFERA_EVIDENCE_SCAN_REQUIRED: "true",
+        CERTIFERA_MALWARE_SCAN_WEBHOOK: "https://scanner.example/scan",
+        NEXT_PUBLIC_SITE_URL: "https://certifera.example",
+      }),
     ).toEqual([]);
   });
 

@@ -202,5 +202,35 @@ describe("scan gating over the real routes", () => {
       .where(and(eq(evidenceAssets.id, asset.id), eq(evidenceAssets.scanStatus, "validated")))
       .limit(1);
     expect(row).toBeUndefined();
+
+    // And the block lifts once the scanner answers, which is the half that did
+    // not exist: "pending" had no exit, so this 409 used to be permanent for
+    // every upload the scanner was too slow to clear.
+    const previousSecret = process.env.CERTIFERA_SCAN_CALLBACK_SECRET;
+    process.env.CERTIFERA_SCAN_CALLBACK_SECRET = `guard-scan-${suffix}`;
+    try {
+      const { POST: scanCallback } = await import("@/app/api/internal/evidence-scan/route");
+      const applied = await scanCallback(
+        new Request("http://localhost/api/internal/evidence-scan", {
+          method: "POST",
+          headers: { authorization: `Bearer guard-scan-${suffix}`, "content-type": "application/json" },
+          body: JSON.stringify({ assetId: asset.id, sha256: asset.sha256, clean: true }),
+        }),
+      );
+      expect(await applied.json()).toMatchObject({ applied: true, scanStatus: "validated" });
+
+      const afterScan = await submitProof(
+        new Request(`http://localhost/api/requests/${workOrderId}/proof`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${relayToken}`, "content-type": "application/json" },
+          body: JSON.stringify({ observation: "Field observation long enough to pass validation.", evidenceAssetId: asset.id, relayId }),
+        }),
+        { params: Promise.resolve({ id: workOrderId }) },
+      );
+      expect(afterScan.status).toBe(201);
+    } finally {
+      if (previousSecret === undefined) delete process.env.CERTIFERA_SCAN_CALLBACK_SECRET;
+      else process.env.CERTIFERA_SCAN_CALLBACK_SECRET = previousSecret;
+    }
   });
 });

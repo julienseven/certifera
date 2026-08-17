@@ -101,7 +101,20 @@ export async function deletePrivateEvidence(asset: { storageProvider: string; st
  */
 const SCAN_TIMEOUT_MS = 20_000;
 
-export async function scanEvidence(input: { bytes: Buffer; fileName: string; contentType: string; sha256: string }) {
+/**
+ * Where the scanner should post a verdict it could not deliver in time.
+ *
+ * Sent on every scan so a scanner that misses the synchronous window has
+ * somewhere to answer. Without it "pending" was terminal, because nothing else
+ * in the deployment ever resolves one.
+ */
+function scanCallback(assetId: string) {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (!siteUrl) return null;
+  return { assetId, callbackUrl: `${siteUrl.replace(/\/$/, "")}/api/internal/evidence-scan` };
+}
+
+export async function scanEvidence(input: { assetId: string; bytes: Buffer; fileName: string; contentType: string; sha256: string }) {
   const scannerUrl = process.env.CERTIFERA_MALWARE_SCAN_WEBHOOK;
   const scanRequired = process.env.CERTIFERA_EVIDENCE_SCAN_REQUIRED === "true";
   if (!scannerUrl) return scanRequired ? { status: "pending" as const } : { status: "validated" as const };
@@ -126,6 +139,7 @@ export async function scanEvidence(input: { bytes: Buffer; fileName: string; con
       ...(process.env.CERTIFERA_MALWARE_SCAN_TOKEN ? { authorization: `Bearer ${process.env.CERTIFERA_MALWARE_SCAN_TOKEN}` } : {}),
     },
     body: JSON.stringify({
+      ...scanCallback(input.assetId),
       fileName: input.fileName,
       contentType: input.contentType,
       sha256: input.sha256,

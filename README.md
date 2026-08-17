@@ -92,6 +92,23 @@ CERTIFERA_MALWARE_SCAN_WEBHOOK=https://scanner.example/scan
 
 Database evidence storage is a sandbox-only fallback. In production, Certifera writes private object keys to S3-compatible storage with server-side encryption and gates proof submission on scan status. Configure hourly `/api/internal/maintenance` execution using the `vercel.json` cron or your platform scheduler.
 
+An upload waits up to 20 seconds for a scan verdict. One that does not arrive in
+time leaves the asset at `pending`, which blocks proof submission for that
+outcome until the scanner posts its verdict back:
+
+```bash
+curl -X POST https://your-certifera-domain/api/internal/evidence-scan \
+  -H "Authorization: Bearer $CERTIFERA_SCAN_CALLBACK_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"assetId":"...","sha256":"...","clean":true}'
+```
+
+Certifera sends the scanner that `assetId` and a `callbackUrl` built from
+`NEXT_PUBLIC_SITE_URL`, so scan gating requires it. A verdict only ever settles
+a `pending` asset — a redelivery cannot reopen one already resolved — and must
+carry the matching `sha256`, so a verdict computed for one file cannot clear
+another.
+
 Settlement mode defaults to sandbox. Use Stripe only after compliance review:
 
 ```env

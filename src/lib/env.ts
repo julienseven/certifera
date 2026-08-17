@@ -87,15 +87,14 @@ export function collectEnvProblems(env: NodeJS.ProcessEnv = process.env): EnvPro
   }
 
   // Scan gating: the failure mode is a deployment where no proof can ever be
-  // submitted. Required scanning with no scanner leaves every upload at
-  // scan_status "pending", and nothing moves a row off "pending" — there is no
-  // scanner callback — so proof submission is refused for every outcome, with
-  // only a warning-level operational event to say why.
-  if (env.CERTIFERA_EVIDENCE_SCAN_REQUIRED === "true" && !env.CERTIFERA_MALWARE_SCAN_WEBHOOK) {
-    problems.push({
-      key: "CERTIFERA_MALWARE_SCAN_WEBHOOK",
-      message: "Required scan gating with no scanner leaves every upload unscanned and permanently blocks proof submission.",
-    });
+  // submitted. An upload the scanner cannot clear inside the synchronous window
+  // rests at scan_status "pending", and the only thing that resolves one is the
+  // scanner posting a verdict back — so gating without a scanner to gate on
+  // refuses proof submission for every outcome, and gating without a reachable
+  // callback URL makes every slow scan permanent.
+  if (env.CERTIFERA_EVIDENCE_SCAN_REQUIRED === "true") {
+    requireKey("CERTIFERA_MALWARE_SCAN_WEBHOOK", "Required scan gating with no scanner leaves every upload unscanned and permanently blocks proof submission.");
+    requireKey("NEXT_PUBLIC_SITE_URL", "The scanner is told where to post a late verdict; without it a scan that misses the upload window can never be resolved.");
   }
 
   // Transport security: the failure mode is accepting any presented certificate.

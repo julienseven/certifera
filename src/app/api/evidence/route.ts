@@ -54,13 +54,16 @@ export async function POST(request: Request) {
     const originalName = safeName(file.name);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const intelligence = await analyzeEvidence(bytes, file.type);
-    const scan = await scanEvidence({ bytes, fileName: originalName, contentType: file.type, sha256 });
+    // Minted before the scan rather than after it: the scanner is handed this
+    // id so a verdict that misses the synchronous window has something to name
+    // when it calls back.
+    const assetId = randomUUID();
+    const scan = await scanEvidence({ assetId, bytes, fileName: originalName, contentType: file.type, sha256 });
     if (scan.status === "rejected") return Response.json({ error: "The evidence scanner rejected this file." }, { status: 400 });
     if (scan.status === "pending") {
       await recordOperationalEvent({ level: "warning", service: "evidence", code: "scan_pending", message: "Evidence uploaded without a completed malware scan; proof submission remains blocked.", resourceType: "work_order", resourceId: workOrderId, data: { sha256 } });
     }
 
-    const assetId = randomUUID();
     const stored = await storePrivateEvidence({ assetId, bytes, contentType: file.type, sha256 });
     // The compensating delete covers exactly the window between writing the
     // bytes and committing the row that owns them. It deliberately stops there:
