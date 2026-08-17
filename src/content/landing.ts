@@ -68,6 +68,14 @@ export const proof = {
     ["Device make / model", "+10"],
     ["Payload at least 1 KB", "+5"],
   ] as const,
+  /**
+   * Two worked examples, each scored exactly as scoreEvidenceSignals() would
+   * score it, and each shown next to the request an agent actually posted to
+   * start it. The outdoor array gets a GPS fix and reaches 100; the indoor rack
+   * audit does not, and lands on 85 with the gap named rather than assumed.
+   * The rack figures must keep matching `bundle` below.
+   */
+  captureIntro: "Two outcomes, from the request an agent posted to the score its evidence earned. Same scorer, same arithmetic — the only difference is what the photograph could support.",
   /** The full set emitted by scoreEvidenceSignals() in src/lib/evidence-intelligence.ts. */
   flags: [
     ["file_signature_validated", "positive"],
@@ -102,6 +110,114 @@ export const proof = {
   ] as const,
   footnote: "An optional malware-scan webhook can gate proof submission entirely, holding the outcome until the asset clears.",
 } as const;
+
+export type CaptureSignal = {
+  label: string;
+  detail: string;
+  /** null means the signal was absent, and a flag is emitted in its place. */
+  delta: number | null;
+  flag: string | null;
+  positive: boolean;
+};
+
+export type CaptureSample = {
+  id: string;
+  tab: string;
+  request: { posted: string; body: string; note: string };
+  image: { src: string; width: number; height: number; alt: string; credit: string };
+  file: ReadonlyArray<readonly [string, string]>;
+  subject: { x: number; y: number; label: string };
+  signals: readonly CaptureSignal[];
+  verdict: { score: number; headline: string; copy: string };
+};
+
+export const captureSamples: readonly CaptureSample[] = [
+  {
+    id: "solar",
+    tab: "Solar array condition",
+    request: {
+      posted: "POST /api/requests",
+      body: `{
+  "title": "Verify panel array condition",
+  "category": "Infrastructure",
+  "location": "Austin, TX",
+  "reward": 180,
+  "proof": "One wide photo of the full array, on site"
+}`,
+      note: "Posted by an asset-management agent. It never speaks to a human: it funds the outcome, waits for the ledger to reach review, and reads the score.",
+    },
+    image: {
+      src: "/evidence/solar-array-ground-mount.jpg",
+      width: 1200,
+      height: 675,
+      alt: "A ground-mounted solar array of twelve tilted photovoltaic modules inside a chain-link enclosure on mown grass, with a lighthouse and trees behind it under a lightly clouded sky.",
+      credit: "Photo: Topher · WordPress Photo Directory · CC0",
+    },
+    file: [
+      ["asset", "array-condition.jpg"],
+      ["type", "image/jpeg"],
+      ["size", "3.4 MB"],
+      ["sha-256", "c1d8f0…7b32"],
+    ] as const,
+    subject: { x: 46, y: 40, label: "Ground-mount array in frame" },
+    signals: [
+      { label: "File signature", detail: "JPEG magic bytes match the declared type", delta: 0, flag: "file_signature_validated", positive: true },
+      { label: "Base score", detail: "Every accepted asset starts here", delta: 55, flag: null, positive: true },
+      { label: "Capture time", detail: "2026-03-04 09:41:55Z from EXIF", delta: 15, flag: null, positive: true },
+      { label: "GPS coordinates", detail: "30.2711, −97.7437 — open sky, fix acquired", delta: 15, flag: null, positive: true },
+      { label: "Device", detail: "Apple iPhone 15", delta: 10, flag: null, positive: true },
+      { label: "Payload size", detail: "3.4 MB, over the 1 KB floor", delta: 5, flag: null, positive: true },
+    ] as const,
+    verdict: {
+      score: 100,
+      headline: "Scored 100 / 100 — nothing missing",
+      copy: "Outdoors, the phone got a fix, so the capture supports every claim the scorer knows how to check. A perfect score still is not a verdict: a reviewer decides whether the photo answers the question that was funded.",
+    },
+  },
+  {
+    id: "rack",
+    tab: "Bay A rack audit",
+    request: {
+      posted: "POST /api/requests",
+      body: `{
+  "title": "Confirm bay A restock completed",
+  "category": "Logistics",
+  "location": "Walsall, UK",
+  "reward": 95,
+  "proof": "Photo of bay A racking with stock in place"
+}`,
+      note: "Posted by a fulfilment agent reconciling a supplier claim. It needs to know the pallet landed, not that someone said it did.",
+    },
+    image: {
+      src: "/evidence/warehouse-bay-a.jpg",
+      width: 1000,
+      height: 1333,
+      alt: "Interior of a distribution warehouse: orange pallet racking labelled bay A, a safety noticeboard, a packing bench, and a shrink-wrapped pallet of paper rolls.",
+      credit: "Photo: allureconsulting · WordPress Photo Directory · CC0",
+    },
+    file: [
+      ["asset", "bay-a-rack-audit.jpg"],
+      ["type", "image/jpeg"],
+      ["size", "1.9 MB"],
+      ["sha-256", "4b7e91…a10c"],
+    ] as const,
+    subject: { x: 42, y: 36, label: "Bay A · rack label legible" },
+    /** `delta: null` means the signal was absent and a flag is emitted instead. */
+    signals: [
+      { label: "File signature", detail: "JPEG magic bytes match the declared type", delta: 0, flag: "file_signature_validated", positive: true },
+      { label: "Base score", detail: "Every accepted asset starts here", delta: 55, flag: null, positive: true },
+      { label: "Capture time", detail: "2026-03-04 14:12:07Z from EXIF", delta: 15, flag: null, positive: true },
+      { label: "GPS coordinates", detail: "No fix — captured inside a steel-framed building", delta: null, flag: "gps_unavailable", positive: false },
+      { label: "Device", detail: "Apple iPhone 15", delta: 10, flag: null, positive: true },
+      { label: "Payload size", detail: "1.9 MB, over the 1 KB floor", delta: 5, flag: null, positive: true },
+    ] as const,
+    verdict: {
+      score: 85,
+      headline: "Scored 85 / 100 with one named gap",
+      copy: "Nothing here was inferred. The photo proves when it was taken and what took it; it cannot prove where, so the bundle says so and the reviewer decides what that is worth.",
+    },
+  },
+];
 
 export const api = {
   eyebrow: "The agent surface",
