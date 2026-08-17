@@ -5,7 +5,7 @@ import { requireIdentity, writeAudit } from "@/lib/auth";
 import { recordLifecycleEvent } from "@/lib/lifecycle";
 import { recordOperationalEvent, reportException } from "@/lib/observability";
 import { releaseSettlement } from "@/lib/settlement";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 
 /**
  * Releases an authorized payout.
@@ -83,16 +83,25 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       attemptId,
     });
 
-    // Money has moved. This transition is unconditional on status because this
-    // caller holds the claim: it is the only one that could have got here, and
-    // leaving the row in "releasing" after a successful transfer would be worse
-    // than any conflict this might overwrite. Still scoped to the attempt id so
-    // a superseded claim can never write over a newer one.
+    // Money has moved. This transition does not re-check for "releasing",
+    // because this caller holds the claim and leaving the row mid-release after
+    // a successful transfer would be worse than any conflict it overwrites: a
+    // webhook that already recorded the release writes the same outcome.
+    //
+    // "failed" is the one status it must not overwrite. The claim commits before
+    // the provider is called, so the payout is reachable by the webhook for the
+    // whole transfer; a transfer.failed landing in that window is the provider
+    // saying the money did not move. Writing "released" on top of it would leave
+    // the ledger claiming a relay was paid when it was not, and silently — the
+    // conflict below is the only thing that raises it to a human.
+    //
+    // Still scoped to the attempt id so a superseded claim cannot write over a
+    // newer one.
     const [released] = await db.transaction(async (tx) => {
       const rows = await tx
         .update(payouts)
         .set({ status: "released", settlementProvider: settlement.provider, settlementRef: settlement.reference, releasedAt: new Date(), failureReason: null })
-        .where(and(eq(payouts.id, claimed.id), eq(payouts.releaseAttemptId, attemptId)))
+        .where(and(eq(payouts.id, claimed.id), eq(payouts.releaseAttemptId, attemptId), ne(payouts.status, "failed")))
         .returning();
       if (rows.length > 0) {
         await recordLifecycleEvent(tx, {
@@ -107,13 +116,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     });
 
     if (!released) {
-      // The transfer succeeded but the row moved out from under this attempt.
-      // Money is out and the ledger disagrees, which needs a human.
+      // The transfer succeeded but the row would not take the release: either it
+      // moved out from under this attempt, or the provider already reported the
+      // transfer failed. Either way the ledger and the provider disagree about
+      // money, which needs a human.
       await recordOperationalEvent({
         level: "critical",
         service: "settlement",
         code: "release_recorded_without_claim",
-        message: "A settlement transfer succeeded but its payout row was no longer held by this attempt.",
+        message: "A settlement transfer succeeded but its payout row would not accept the release.",
         resourceType: "payout",
         resourceId: claimed.id,
         data: { attemptId, settlementRef: settlement.reference, provider: settlement.provider },
